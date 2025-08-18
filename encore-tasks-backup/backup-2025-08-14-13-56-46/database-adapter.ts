@@ -1,0 +1,298 @@
+// =====================================================
+// АДАПТЕР ДЛЯ РАБОТЫ С БАЗАМИ ДАННЫХ
+// =====================================================
+
+import { User as MySQLUser, Project as MySQLProject, Board as MySQLBoard, Column as MySQLColumn, Task as MySQLTask, UserSession as MySQLUserSession } from './mysql-db';
+import { User, Project, Board, Column, Task, Session } from '@/types';
+import SQLiteAdapterOptimized from './sqlite-adapter-optimized';
+
+// =====================================================
+// ТИПЫ ДАННЫХ
+// =====================================================
+
+export type DatabaseType = 'sqlite';
+
+export interface DatabaseStatus {
+  sqlite: boolean;
+  current: DatabaseType;
+}
+
+// =====================================================
+// КЛАСС АДАПТЕРА БАЗЫ ДАННЫХ
+// =====================================================
+
+export class DatabaseAdapter {
+  private static instance: DatabaseAdapter;
+  private currentDatabase: DatabaseType = 'sqlite';
+  private isInitialized = false;
+  private sqliteAdapter: SQLiteAdapterOptimized;
+
+  private constructor() {
+    this.sqliteAdapter = SQLiteAdapterOptimized.getInstance();
+    this.currentDatabase = 'sqlite';
+  }
+
+  public static getInstance(): DatabaseAdapter {
+    if (!DatabaseAdapter.instance) {
+      DatabaseAdapter.instance = new DatabaseAdapter();
+    }
+    return DatabaseAdapter.instance;
+  }
+
+  /**
+   * Инициализация адаптера
+   */
+  public async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+
+    try {
+      // Используем только SQLite
+      await this.sqliteAdapter.initialize();
+      this.currentDatabase = 'sqlite';
+      console.log('🎯 Database Adapter: Используется SQLite');
+
+      this.isInitialized = true;
+      console.log('✅ Database Adapter: Инициализация завершена');
+    } catch (error) {
+      console.error('❌ Database Adapter: Ошибка инициализации SQLite:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение статуса базы данных
+   */
+  public async getDatabaseStatus(): Promise<DatabaseStatus> {
+    const sqlite = await Promise.resolve(this.sqliteAdapter.initialize()).then(() => true).catch(() => false);
+    
+    return {
+      sqlite,
+      current: this.currentDatabase
+    };
+  }
+
+
+
+  /**
+   * Получение текущей базы данных
+   */
+  public getCurrentDatabase(): DatabaseType {
+    return this.currentDatabase;
+  }
+
+  // =====================================================
+  // ОПЕРАЦИИ С ПОЛЬЗОВАТЕЛЯМИ
+  // =====================================================
+
+  /**
+   * Создание пользователя
+   */
+  public async createUser(userData: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User> {
+    await this.initialize();
+    return await this.sqliteAdapter.createUser(userData);
+  }
+
+  /**
+   * Получение пользователя по ID
+   */
+  public async getUserById(id: string): Promise<User | null> {
+    await this.initialize();
+    return await this.sqliteAdapter.getUserById(id);
+  }
+
+  /**
+   * Получение пользователя по email
+   */
+  public async getUserByEmail(email: string): Promise<User | null> {
+    await this.initialize();
+    return await this.sqliteAdapter.getUserByEmail(email);
+  }
+
+  /**
+   * Получение всех пользователей
+   */
+  public async getAllUsers(): Promise<User[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getAllUsers();
+  }
+
+  /**
+   * Обновление пользователя
+   */
+  public async updateUser(id: string, updates: Partial<User>): Promise<User | null> {
+    await this.initialize();
+    return await this.sqliteAdapter.updateUser(id, updates);
+  }
+
+  /**
+   * Удаление пользователя
+   */
+  public async deleteUser(id: string): Promise<boolean> {
+    await this.initialize();
+    return await this.sqliteAdapter.deleteUser(id);
+  }
+
+  // =====================================================
+  // ОПЕРАЦИИ С СЕССИЯМИ
+  // =====================================================
+
+  /**
+   * Создание сессии
+   */
+  public async createSession(sessionData: Omit<Session, 'id' | 'created_at'>): Promise<Session> {
+    await this.initialize();
+    return await this.sqliteAdapter.createSession(sessionData);
+  }
+
+  /**
+   * Получение сессии по токену
+   */
+  public async getSessionByToken(token: string): Promise<Session | null> {
+    await this.initialize();
+    return await this.sqliteAdapter.getSessionByToken(token);
+  }
+
+  /**
+   * Обновление активности сессии
+   */
+  public async updateSessionActivity(token: string): Promise<boolean> {
+    await this.initialize();
+    // SQLiteAdapterOptimized doesn't have this method, so we'll just return true for now
+    return true;
+  }
+
+  /**
+   * Удаление сессии
+   */
+  public async deleteSession(token: string): Promise<boolean> {
+    await this.initialize();
+    await this.sqliteAdapter.deleteSession(token);
+    return true;
+  }
+
+  // =====================================================
+  // ОПЕРАЦИИ С ПРОЕКТАМИ
+  // =====================================================
+
+  /**
+   * Создание проекта
+   */
+  public async createProject(projectData: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Promise<Project> {
+    await this.initialize();
+    return await this.sqliteAdapter.createProject(projectData);
+  }
+
+  /**
+   * Получение проекта по ID
+   */
+  public async getProjectById(id: string): Promise<Project | null> {
+    await this.initialize();
+    return await this.sqliteAdapter.getProjectById(id);
+  }
+
+  /**
+   * Получение всех проектов
+   */
+  public async getAllProjects(): Promise<Project[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getAllProjects();
+  }
+
+  /**
+   * Получение проектов пользователя
+   */
+  public async getUserProjects(userId: string): Promise<Project[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getUserProjects(userId);
+  }
+
+  /**
+   * Получение проектов по ID создателя
+   */
+  public async getProjectsByCreatorId(creatorId: string): Promise<Project[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getProjectsByCreatorId(creatorId);
+  }
+
+  /**
+   * Проверка доступа к проекту
+   */
+  public async hasProjectAccess(userId: string, projectId: string): Promise<boolean> {
+    await this.initialize();
+    return await this.sqliteAdapter.hasProjectAccess(userId, projectId);
+  }
+
+  // =====================================================
+  // ОПЕРАЦИИ С ДОСКАМИ
+  // =====================================================
+
+  /**
+   * Получение досок проекта
+   */
+  public async getProjectBoards(projectId: string): Promise<Board[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getProjectBoards(projectId);
+  }
+
+  // =====================================================
+  // ОПЕРАЦИИ С КОЛОНКАМИ
+  // =====================================================
+
+  /**
+   * Получение колонок доски
+   */
+  public async getBoardColumns(boardId: string): Promise<Column[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getBoardColumns(boardId);
+  }
+
+  /**
+   * Создание колонки
+   */
+  public async createColumn(columnData: Omit<Column, 'id' | 'created_at' | 'updated_at'>): Promise<Column> {
+    await this.initialize();
+    return await this.sqliteAdapter.createColumn(columnData);
+  }
+
+  // =====================================================
+  // ОПЕРАЦИИ С ЗАДАЧАМИ
+  // =====================================================
+
+  /**
+   * Создание задачи
+   */
+  public async createTask(taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task> {
+    await this.initialize();
+    return await this.sqliteAdapter.createTask(taskData);
+  }
+
+  /**
+   * Получение задач колонки
+   */
+  public async getColumnTasks(columnId: string): Promise<Task[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.getColumnTasks(columnId);
+  }
+
+  /**
+   * Удаление задачи
+   */
+  public async deleteTask(id: string): Promise<boolean> {
+    await this.initialize();
+    return await this.sqliteAdapter.deleteTask(id);
+  }
+
+  /**
+   * Выполнение сырого SQL запроса (для совместимости с репозиториями)
+   */
+  public async query(sql: string, params?: unknown[]): Promise<unknown[]> {
+    await this.initialize();
+    return await this.sqliteAdapter.executeRawQuery(sql, params);
+  }
+
+}
+
+
+
+// Экспорт единственного экземпляра
+export const dbAdapter = DatabaseAdapter.getInstance();

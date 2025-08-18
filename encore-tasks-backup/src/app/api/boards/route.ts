@@ -1,0 +1,191 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyAuth } from '@/lib/auth';
+import { z } from 'zod';
+import { BoardService } from '@/services/implementations/board.service';
+import { BoardRepository } from '@/services/implementations/board.repository';
+import { BoardValidator } from '@/services/implementations/board.validator';
+import { PermissionService } from '@/services/implementations/permission.service';
+import { dbAdapter } from '@/lib/database-adapter';
+
+const createBoardSchema = z.object({
+  name: z.string().min(1, 'Board name is required'),
+  description: z.string().optional(),
+  projectId: z.string().min(1, 'Project ID is required'),
+  visibility: z.enum(['private', 'public']).default('private'),
+  color: z.string().regex(/^#[0-9A-F]{6}$/i, 'Invalid color format').optional(),
+});
+
+// Инициализация сервисов
+const boardRepository = new BoardRepository(dbAdapter);
+const boardValidator = new BoardValidator();
+const permissionService = new PermissionService(dbAdapter);
+const boardService = new BoardService(
+  boardRepository,
+  boardValidator,
+  permissionService,
+  null,  // event service
+  null   // cache service
+);
+
+// Получение списка досок
+export async function GET(request: NextRequest) {
+  try {
+    // Проверка авторизации
+    const authResult = await verifyAuth(request);
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: 401 }
+      );
+    }
+
+    const { userId } = authResult.user!;
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('projectId');
+
+    if (!projectId || projectId === 'null' || projectId === 'undefined' || projectId.trim() === '') {
+      return NextResponse.json(
+        { error: 'ID проекта обязателен' },
+        { status: 400 }
+      );
+    }
+    
+    // Проверка доступа к проекту
+    const hasAccess = await dbAdapter.hasProjectAccess(userId, projectId);
+    if (!hasAccess) {
+      return NextResponse.json(
+        { error: 'Нет доступа к проекту' },
+        { status: 403 }
+      );
+    }
+
+    // Используем новый сервис для получения досок
+    const result = await boardService.getBoardsByProject(projectId, userId, {
+      includeArchived: searchParams.get('includeArchived') === 'true',
+      sortBy: (searchParams.get('sortBy') as any) || 'position',
+      sortOrder: (searchParams.get('sortOrder') as any) || 'asc'
+    });
+
+    if (!result.success) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
+    return NextResponse.json({ boards: result.data });
+  } catch (error) {
+    console.error('Ошибка получения досок:', error);
+    return NextResponse.json(
+      { error: 'Внутренняя ошибка сервера' },
+      { status: 500 }
+    );
+  }
+}
+
+// Создание новой доски
+export async function POST(request: NextRequest) {
+  try {
+    const authResult = await verifyAuth(request);
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: 401 }
+      );
+    }
+
+    const { userId } = authResult.user!;
+    const body = await request.json();
+    const validatedData = createBoardSchema.parse(body);
+
+    // Проверяем права на создание доски
+    const canCreate = await permissionService.canUserCreateBoard(validatedData.projectId, userId);
+    if (!canCreate) {
+      return NextResponse.json({ error: 'Нет прав на создание досок в этом проекте' }, { status: 403 });
+    }
+
+    // Используем новый сервис для создания доски
+    const result = await boardService.createBoard({
+      name: validatedData.name,
+      description: validatedData.description || null,
+      projectId: validatedData.projectId,
+      visibility: validatedData.visibility,
+      color: validatedData.color || '#3B82F6',
+      settings: {
+        allowTaskCreation: true,
+        allowColumnReordering: true,
+        enableTaskLimits: false,
+        defaultTaskPriority: 'medium',
+        autoArchiveCompletedTasks: false
+      }
+    }, userId);
+
+    if (!result.success) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
+    return NextResponse.json({ board: result.data }, { status: 201 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Validation error', details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    console.error('Error creating board:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+// Удаление доски (только для администраторов)
+export async function DELETE(request: NextRequest) {
+  try {
+    const authResult = await verifyAuth(request);
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: 401 }
+      );
+    }
+
+    const { user } = authResult;
+    const { searchParams } = new URL(request.url);
+    const boardId = searchParams.get('boardId');
+
+    if (!boardId) {
+      return NextResponse.json(
+        { error: 'ID доски обязателен' },
+        { status: 400 }
+      );
+    }
+    
+    // Проверка прав на удаление доски
+    const canDelete = await permissionService.canUserDeleteBoard(user.id, Number(boardId));
+    if (!canDelete) {
+      return NextResponse.json(
+        { error: 'Недостаточно прав для удаления доски' },
+        { status: 403 }
+      );
+    }
+
+    // Используем новый сервис для удаления доски
+    const result = await boardService.delete(boardId, user.id);
+
+    if (!result.success) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { message: 'Доска успешно удалена' },
+      { status: 200 }
+    );
+
+  } catch (error) {
+    console.error('Ошибка удаления доски:', error);
+    return NextResponse.json(
+      { error: 'Внутренняя ошибка сервера' },
+      { status: 500 }
+    );
+  }
+}
