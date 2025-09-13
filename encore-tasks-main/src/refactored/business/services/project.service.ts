@@ -4,10 +4,11 @@
 import { IProjectService, IProjectRepository, IProjectValidator } from '../interfaces';
 import {
   Project,
+  ProjectRole,
+  ProjectPermissions,
   SearchFilters,
   SortOptions,
-  PaginationOptions,
-  ValidationResult
+  PaginationOptions
 } from '../../data/types';
 import { projectRepository } from '../../data/repositories';
 import { ProjectValidator } from '../validators';
@@ -24,13 +25,29 @@ export class ProjectService implements IProjectService {
     this.validator = validator;
   }
 
-  async getById(id: string): Promise<Project | null> {
+  async getById(id: string, userId: string): Promise<Project> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findById(id);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const project = await this.repository.findById(id);
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    // Check if user has access to this project
+    const hasAccess = await this.canUserAccess(id, userId);
+    if (!hasAccess) {
+      throw new Error('Access denied');
+    }
+
+    return project;
   }
 
   async getByUserId(
@@ -75,16 +92,23 @@ export class ProjectService implements IProjectService {
   }
 
   async create(
-    projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>
+    projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'members' | 'statistics'>,
+    userId: string
   ): Promise<Project> {
     const validation = this.validator.validateCreate(projectData);
     if (!validation.isValid) {
       throw new Error(`Invalid project data: ${validation.errors.join(', ')}`);
     }
 
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
     // Business logic: Set default values
     const projectWithDefaults = {
       ...projectData,
+      ownerId: userId,
       color: projectData.color || '#3B82F6',
       isArchived: projectData.isArchived || false,
       settings: projectData.settings || {
@@ -94,7 +118,13 @@ export class ProjectService implements IProjectService {
         defaultTaskPriority: 'medium',
         autoArchiveCompletedTasks: false
       },
-      statistics: projectData.statistics || {
+      members: [{
+        userId,
+        role: 'owner' as const,
+        joinedAt: new Date(),
+        permissions: this.getDefaultPermissions('owner')
+      }],
+      statistics: {
         totalBoards: 0,
         totalTasks: 0,
         completedTasks: 0,
@@ -108,111 +138,165 @@ export class ProjectService implements IProjectService {
 
   async update(
     id: string,
-    updates: Partial<Project>
+    projectData: Partial<Project>,
+    userId: string
   ): Promise<Project> {
-    const idValidation = this.validator.validateId(id);
-    if (!idValidation.isValid) {
-      throw new Error(`Invalid project ID: ${idValidation.errors.join(', ')}`);
-    }
-
-    const updateValidation = this.validator.validateUpdate(updates);
-    if (!updateValidation.isValid) {
-      throw new Error(`Invalid update data: ${updateValidation.errors.join(', ')}`);
-    }
-
-    // Check if project exists
-    const existingProject = await this.repository.findById(id);
-    if (!existingProject) {
-      throw new Error('Project not found');
-    }
-
-    // Business logic: Prevent certain updates on archived projects
-    if (existingProject.isArchived && updates.name) {
-      throw new Error('Cannot update name of archived project');
-    }
-
-    return await this.repository.update(id, updates);
-  }
-
-  async delete(id: string): Promise<void> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    // Check if project exists
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const updateValidation = this.validator.validateUpdate(projectData);
+    if (!updateValidation.isValid) {
+      throw new Error(`Invalid update data: ${updateValidation.errors.join(', ')}`);
+    }
+
     const existingProject = await this.repository.findById(id);
     if (!existingProject) {
       throw new Error('Project not found');
     }
 
-    // Business logic: Archive instead of delete if project has data
-    const stats = await this.repository.getStatistics(id);
-    if (stats.totalBoards > 0 || stats.totalTasks > 0) {
-      throw new Error('Cannot delete project with existing boards or tasks. Archive it instead.');
+    // Check if user has permission to update this project
+    const hasPermission = await this.canUserModify(id, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
+    }
+
+    return await this.repository.update(id, projectData);
+  }
+
+  async delete(id: string, userId: string): Promise<void> {
+    const validation = this.validator.validateId(id);
+    if (!validation.isValid) {
+      throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const existingProject = await this.repository.findById(id);
+    if (!existingProject) {
+      throw new Error('Project not found');
+    }
+
+    // Check if user has permission to delete this project
+    const hasPermission = await this.canUserModify(id, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
+    }
+
+    // Business logic: Only allow deletion of archived projects
+    if (!existingProject.isArchived) {
+      throw new Error('Project must be archived before deletion');
     }
 
     await this.repository.delete(id);
   }
 
-  async archive(id: string): Promise<Project> {
+
+  async archive(id: string, userId: string): Promise<Project> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    // Check if project exists
-    const existingProject = await this.repository.findById(id);
-    if (!existingProject) {
-      throw new Error('Project not found');
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
     }
 
-    if (existingProject.isArchived) {
-      throw new Error('Project is already archived');
+    const hasPermission = await this.canUserModify(id, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
     }
 
-    return await this.repository.archive(id);
+    return await this.repository.update(id, { isArchived: true });
   }
 
-  async restore(id: string): Promise<Project> {
+  async restore(id: string, userId: string): Promise<Project> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    // Check if project exists
-    const existingProject = await this.repository.findById(id);
-    if (!existingProject) {
-      throw new Error('Project not found');
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
     }
 
-    if (!existingProject.isArchived) {
-      throw new Error('Project is not archived');
+    const hasPermission = await this.canUserModify(id, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
     }
 
-    return await this.repository.restore(id);
+    return await this.repository.update(id, { isArchived: false });
   }
 
-  async updatePosition(id: string, position: number): Promise<void> {
-    const idValidation = this.validator.validateId(id);
-    if (!idValidation.isValid) {
-      throw new Error(`Invalid project ID: ${idValidation.errors.join(', ')}`);
+  async duplicate(id: string, userId: string, newName?: string): Promise<Project> {
+    const validation = this.validator.validateId(id);
+    if (!validation.isValid) {
+      throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    if (position < 0) {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const originalProject = await this.getById(id, userId);
+    const duplicateData = {
+      ...originalProject,
+      name: newName || `${originalProject.name} (Copy)`,
+      isArchived: false
+    };
+    
+    // Remove fields that shouldn't be duplicated
+    delete (duplicateData as any).id;
+    delete (duplicateData as any).createdAt;
+    delete (duplicateData as any).updatedAt;
+    delete (duplicateData as any).members;
+    delete (duplicateData as any).statistics;
+
+    return await this.create(duplicateData, userId);
+  }
+
+  async updatePosition(id: string, newPosition: number): Promise<void> {
+    const validation = this.validator.validateId(id);
+    if (!validation.isValid) {
+      throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
+    }
+
+    if (newPosition < 0) {
       throw new Error('Position must be non-negative');
     }
 
-    await this.repository.updatePosition(id, position);
+    await this.repository.updatePosition(id, newPosition);
   }
 
-  async getStatistics(id: string): Promise<Project['statistics']> {
-    const validation = this.validator.validateId(id);
+  async getStatistics(projectId: string, userId: string): Promise<any> {
+    const validation = this.validator.validateId(projectId);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.getStatistics(id);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const hasAccess = await this.canUserAccess(projectId, userId);
+    if (!hasAccess) {
+      throw new Error('Access denied');
+    }
+
+    return await this.repository.getStatistics(projectId);
   }
 
   async getMembers(id: string): Promise<Project['members']> {
@@ -226,16 +310,22 @@ export class ProjectService implements IProjectService {
 
   async addMember(
     projectId: string,
-    member: Project['members'][0]
+    memberData: { userId: string; role: string },
+    userId: string
   ): Promise<void> {
     const idValidation = this.validator.validateId(projectId);
     if (!idValidation.isValid) {
       throw new Error(`Invalid project ID: ${idValidation.errors.join(', ')}`);
     }
 
-    const memberValidation = this.validator.validateMember(member);
-    if (!memberValidation.isValid) {
-      throw new Error(`Invalid member data: ${memberValidation.errors.join(', ')}`);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const hasPermission = await this.canUserModify(projectId, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
     }
 
     // Check if project exists
@@ -246,21 +336,23 @@ export class ProjectService implements IProjectService {
 
     // Business logic: Check if user is already a member
     const existingMembers = await this.repository.getMembers(projectId);
-    const isAlreadyMember = existingMembers.some(m => m.userId === member.userId);
+    const isAlreadyMember = existingMembers.some(m => m.userId === memberData.userId);
     if (isAlreadyMember) {
       throw new Error('User is already a member of this project');
     }
 
     // Set default permissions based on role
     const memberWithDefaults = {
-      ...member,
-      permissions: member.permissions || this.getDefaultPermissions(member.role)
+      userId: memberData.userId,
+      role: memberData.role as any,
+      joinedAt: new Date(),
+      permissions: this.getDefaultPermissions(memberData.role)
     };
 
     await this.repository.addMember(projectId, memberWithDefaults);
   }
 
-  async removeMember(projectId: string, userId: string): Promise<void> {
+  async removeMember(projectId: string, memberId: string, userId: string): Promise<void> {
     const projectIdValidation = this.validator.validateId(projectId);
     if (!projectIdValidation.isValid) {
       throw new Error(`Invalid project ID: ${projectIdValidation.errors.join(', ')}`);
@@ -269,6 +361,16 @@ export class ProjectService implements IProjectService {
     const userIdValidation = this.validator.validateId(userId);
     if (!userIdValidation.isValid) {
       throw new Error(`Invalid user ID: ${userIdValidation.errors.join(', ')}`);
+    }
+
+    const memberIdValidation = this.validator.validateId(memberId);
+    if (!memberIdValidation.isValid) {
+      throw new Error(`Invalid member ID: ${memberIdValidation.errors.join(', ')}`);
+    }
+
+    const hasPermission = await this.canUserModify(projectId, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
     }
 
     // Check if project exists
@@ -278,17 +380,18 @@ export class ProjectService implements IProjectService {
     }
 
     // Business logic: Cannot remove project owner
-    if (existingProject.ownerId === userId) {
+    if (existingProject.ownerId === memberId) {
       throw new Error('Cannot remove project owner');
     }
 
-    await this.repository.removeMember(projectId, userId);
+    await this.repository.removeMember(projectId, memberId);
   }
 
   async updateMemberRole(
     projectId: string,
-    userId: string,
-    role: Project['members'][0]['role']
+    memberId: string,
+    role: ProjectRole,
+    userId: string
   ): Promise<void> {
     const projectIdValidation = this.validator.validateId(projectId);
     if (!projectIdValidation.isValid) {
@@ -298,6 +401,16 @@ export class ProjectService implements IProjectService {
     const userIdValidation = this.validator.validateId(userId);
     if (!userIdValidation.isValid) {
       throw new Error(`Invalid user ID: ${userIdValidation.errors.join(', ')}`);
+    }
+
+    const memberIdValidation = this.validator.validateId(memberId);
+    if (!memberIdValidation.isValid) {
+      throw new Error(`Invalid member ID: ${memberIdValidation.errors.join(', ')}`);
+    }
+
+    const hasPermission = await this.canUserModify(projectId, userId);
+    if (!hasPermission) {
+      throw new Error('Access denied');
     }
 
     if (!['owner', 'admin', 'member', 'viewer'].includes(role)) {
@@ -311,14 +424,28 @@ export class ProjectService implements IProjectService {
     }
 
     // Business logic: Cannot change owner role
-    if (existingProject.ownerId === userId && role !== 'owner') {
+    if (existingProject.ownerId === memberId && role !== 'owner') {
       throw new Error('Cannot change project owner role');
     }
 
-    await this.repository.updateMemberRole(projectId, userId, role);
+    await this.repository.updateMemberRole(projectId, memberId, role);
   }
 
-  async canUserAccess(projectId: string, userId: string): Promise<boolean> {
+  async checkPermissions(projectId: string, userId: string, permission: string): Promise<boolean> {
+    const validation = this.validator.validateId(projectId);
+    if (!validation.isValid) {
+      return false;
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      return false;
+    }
+
+    return await this.repository.checkPermissions(projectId, userId, permission);
+  }
+
+  private async canUserAccess(projectId: string, userId: string): Promise<boolean> {
     const projectIdValidation = this.validator.validateId(projectId);
     if (!projectIdValidation.isValid) {
       return false;
@@ -348,7 +475,7 @@ export class ProjectService implements IProjectService {
     }
   }
 
-  async canUserEdit(projectId: string, userId: string): Promise<boolean> {
+  private async canUserModify(projectId: string, userId: string): Promise<boolean> {
     const hasAccess = await this.canUserAccess(projectId, userId);
     if (!hasAccess) {
       return false;
@@ -360,7 +487,7 @@ export class ProjectService implements IProjectService {
         return false;
       }
 
-      // Owner always can edit
+      // Owner always can modify
       if (project.ownerId === userId) {
         return true;
       }
@@ -375,7 +502,11 @@ export class ProjectService implements IProjectService {
     }
   }
 
-  private getDefaultPermissions(role: string): Record<string, boolean> {
+  async canUserEdit(projectId: string, userId: string): Promise<boolean> {
+    return await this.canUserModify(projectId, userId);
+  }
+
+  private getDefaultPermissions(role: string): ProjectPermissions {
     switch (role) {
       case 'owner':
         return {

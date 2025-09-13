@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { CreateTaskData, TaskStatus, TaskPriority } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select, DatePicker, UserSelect } from '../../common';
+import { CreateTaskData } from '../../../data/types';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { Input } from '../common/Input';
+import { Textarea } from '../common/Textarea';
+import { Select } from '../common/Select';
+// DatePicker and UserSelect components don't exist, using alternatives
 import { TaskValidator } from '../../../business/validators';
 import { useProjects } from '../../hooks/useProjects';
 import { useBoards } from '../../hooks/useBoards';
@@ -26,7 +31,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [formData, setFormData] = useState<CreateTaskData>({
     title: '',
     description: '',
-    status: 'todo',
     priority: 'medium',
     columnId: columnId || '',
     boardId: boardId || '',
@@ -55,7 +59,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       setFormData({
         title: '',
         description: '',
-        status: 'todo',
         priority: 'medium',
         columnId: columnId || '',
         boardId: boardId || '',
@@ -66,14 +69,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   }, [isOpen, columnId, boardId, projectId]);
   
-  // Status options
-  const statusOptions = [
-    { value: 'todo', label: 'To Do' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'review', label: 'Review' },
-    { value: 'done', label: 'Done' }
-  ];
-
   // Priority options
   const priorityOptions = [
     { value: 'low', label: '⬇️ Low' },
@@ -106,14 +101,14 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     // Validate title
     const titleValidation = TaskValidator.validateTitle(formData.title);
     if (!titleValidation.isValid) {
-      newErrors.title = titleValidation.errors[0];
+      newErrors.title = titleValidation.errors[0].message;
     }
 
     // Validate description (optional)
     if (formData.description) {
       const descValidation = TaskValidator.validateDescription(formData.description);
       if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
+        newErrors.description = descValidation.errors[0].message;
       }
     }
 
@@ -136,7 +131,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     if (formData.dueDate) {
       const dueDateValidation = TaskValidator.validateDueDate(formData.dueDate);
       if (!dueDateValidation.isValid) {
-        newErrors.dueDate = dueDateValidation.errors[0];
+        newErrors.dueDate = dueDateValidation.errors[0].message;
       }
     }
 
@@ -167,7 +162,6 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     setFormData({
       title: '',
       description: '',
-      status: 'todo',
       priority: 'medium',
       columnId: columnId || '',
       boardId: boardId || '',
@@ -178,7 +172,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     onClose();
   };
 
-  const handleInputChange = (field: keyof CreateTaskData, value: any) => {
+  const handleInputChange = (field: keyof CreateTaskData, value: string | string[] | Date | undefined) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
     if (errors[field]) {
@@ -250,35 +244,19 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           />
         </div>
 
-        {/* Status and Priority */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="create-task-status" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Status *
-            </label>
-            <Select
-              id="create-task-status"
-              value={formData.status}
-              onChange={(value) => handleInputChange('status', value)}
-              options={statusOptions}
-              error={errors.status}
-              disabled={isSubmitting}
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="create-task-priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Priority *
-            </label>
-            <Select
-              id="create-task-priority"
-              value={formData.priority}
-              onChange={(value) => handleInputChange('priority', value)}
-              options={priorityOptions}
-              error={errors.priority}
-              disabled={isSubmitting}
-            />
-          </div>
+        {/* Priority */}
+        <div>
+          <label htmlFor="create-task-priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Priority *
+          </label>
+          <Select
+            id="create-task-priority"
+            value={formData.priority || 'medium'}
+            onChange={(value) => handleInputChange('priority', value)}
+            options={priorityOptions}
+            error={errors.priority}
+            disabled={isSubmitting}
+          />
         </div>
 
         {/* Project, Board, Column Selection */}
@@ -290,7 +268,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </label>
               <Select
                 id="create-task-project"
-                value={formData.projectId}
+                value={formData.projectId || ''}
                 onChange={handleProjectChange}
                 options={projectOptions}
                 placeholder="Select a project"
@@ -307,7 +285,7 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               </label>
               <Select
                 id="create-task-board"
-                value={formData.boardId}
+                value={formData.boardId || ''}
                 onChange={handleBoardChange}
                 options={boardOptions}
                 placeholder="Select a board"
@@ -350,33 +328,32 @@ const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
           <label htmlFor="create-task-due-date" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Due Date
           </label>
-          <DatePicker
+          <Input
             id="create-task-due-date"
-            value={formData.dueDate}
-            onChange={(date) => handleInputChange('dueDate', date)}
+            type="date"
+            value={formData.dueDate ? new Date(formData.dueDate).toISOString().split('T')[0] : ''}
+            onChange={(e) => handleInputChange('dueDate', e.target.value ? new Date(e.target.value) : undefined)}
             placeholder="Select due date (optional)"
             error={errors.dueDate}
             disabled={isSubmitting}
-            minDate={new Date()}
+            min={new Date().toISOString().split('T')[0]}
           />
         </div>
 
-        {/* Assignees */}
-        <div>
+        {/* Assignees - Temporarily disabled until UserSelect component is available */}
+        {/* <div>
           <label htmlFor="create-task-assignees" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Assignees
           </label>
-          <UserSelect
+          <Input
             id="create-task-assignees"
-            value={formData.assigneeIds || []}
-            onChange={(userIds) => handleInputChange('assigneeIds', userIds)}
-            placeholder="Select assignees (optional)"
-            multiple
-            error={errors.assigneeIds}
-            disabled={isSubmitting}
-            projectId={formData.projectId}
+            type="text"
+            value=""
+            onChange={() => {}}
+            placeholder="Assignee selection not available"
+            disabled={true}
           />
-        </div>
+        </div> */}
 
         {/* Submit Error */}
         {errors.submit && (

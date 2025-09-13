@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { TaskFilters as TaskFiltersType, TaskStatus, TaskPriority, TaskSortField, SortOrder } from '../../../data/types';
-import { Button, Select, Checkbox, Badge } from '../../common';
+import React, { useState } from 'react';
+import { TaskFilters as TaskFiltersType, TaskSortField, SortOrder } from '../../../data/types';
+import { Button, Select, Checkbox, Badge } from '../common';
 import { useProjects } from '../../hooks/useProjects';
 import { useBoards } from '../../hooks/useBoards';
 import { useColumns } from '../../hooks/useColumns';
@@ -36,12 +36,12 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
   // Load data for filter options
   const { projects } = useProjects({ autoLoad: true, pageSize: 100 });
   const { boards } = useBoards({ 
-    projectId: filters.projectId || projectId,
+    projectId: (filters.projectIds && filters.projectIds[0]) || projectId,
     autoLoad: !columnId && !boardId,
     pageSize: 100
   });
   const { columns } = useColumns({ 
-    boardId: filters.boardId || boardId,
+    boardId: (filters.boardIds && filters.boardIds[0]) || boardId,
     autoLoad: !columnId,
     pageSize: 100
   });
@@ -120,8 +120,12 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
     return value !== undefined && value !== '' && value !== null;
   }).length;
 
-  const handleFilterChange = (key: keyof TaskFiltersType, value: any) => {
-    onFiltersChange({ [key]: value === '' ? undefined : value });
+  const handleFilterChange = (key: keyof TaskFiltersType, value: string | string[] | undefined) => {
+    onFiltersChange({ [key]: value === '' || value === undefined ? undefined : value });
+  };
+
+  const handleBooleanFilterChange = (key: keyof TaskFiltersType, value: boolean | undefined) => {
+    onFiltersChange({ [key]: value });
   };
 
   const handleSortFieldChange = (field: string) => {
@@ -135,38 +139,38 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
   const getActiveFilters = () => {
     const active = [];
     
-    if (filters.status) {
-      const statusLabel = statusOptions.find(opt => opt.value === filters.status)?.label;
-      active.push({ key: 'status', label: `Status: ${statusLabel}` });
+    if (filters.statuses && filters.statuses.length > 0) {
+      const statusLabel = statusOptions.find(opt => opt.value === filters.statuses?.[0])?.label;
+      active.push({ key: 'statuses', label: `Status: ${statusLabel}` });
     }
     
-    if (filters.priority) {
-      const priorityLabel = priorityOptions.find(opt => opt.value === filters.priority)?.label;
-      active.push({ key: 'priority', label: `Priority: ${priorityLabel}` });
+    if (filters.priorities && filters.priorities.length > 0) {
+      const priorityLabel = priorityOptions.find(opt => opt.value === filters.priorities?.[0])?.label;
+      active.push({ key: 'priorities', label: `Priority: ${priorityLabel}` });
     }
     
-    if (filters.projectId && !projectId) {
-      const projectLabel = projects.find(p => p.id === filters.projectId)?.name;
-      active.push({ key: 'projectId', label: `Project: ${projectLabel}` });
+    if (filters.projectIds && filters.projectIds.length > 0 && !projectId) {
+      const projectLabel = projects.find(p => p.id === filters.projectIds?.[0])?.name;
+      active.push({ key: 'projectIds', label: `Project: ${projectLabel}` });
     }
     
-    if (filters.boardId && !boardId) {
-      const boardLabel = boards.find(b => b.id === filters.boardId)?.name;
-      active.push({ key: 'boardId', label: `Board: ${boardLabel}` });
+    if (filters.boardIds && filters.boardIds.length > 0 && !boardId) {
+      const boardLabel = boards.find(b => b.id === filters.boardIds?.[0])?.name;
+      active.push({ key: 'boardIds', label: `Board: ${boardLabel}` });
     }
     
-    if (filters.columnId && !columnId) {
-      const columnLabel = columns.find(c => c.id === filters.columnId)?.name;
-      active.push({ key: 'columnId', label: `Column: ${columnLabel}` });
+    if (filters.columnIds && filters.columnIds.length > 0 && !columnId) {
+      const columnLabel = columns.find(c => c.id === filters.columnIds?.[0])?.name;
+      active.push({ key: 'columnIds', label: `Column: ${columnLabel}` });
     }
     
-    if (filters.assigneeId) {
-      if (filters.assigneeId === 'unassigned') {
-        active.push({ key: 'assigneeId', label: 'Assignee: Unassigned' });
+    if (filters.assigneeIds && filters.assigneeIds.length > 0) {
+      if (filters.assigneeIds[0] === 'unassigned') {
+        active.push({ key: 'assigneeIds', label: 'Assignee: Unassigned' });
       } else {
-        const assigneeLabel = users.find(u => u.id === filters.assigneeId)?.name || 
-                             users.find(u => u.id === filters.assigneeId)?.email;
-        active.push({ key: 'assigneeId', label: `Assignee: ${assigneeLabel}` });
+        const assigneeLabel = users.find(u => u.id === filters.assigneeIds?.[0])?.name || 
+                             users.find(u => u.id === filters.assigneeIds?.[0])?.email;
+        active.push({ key: 'assigneeIds', label: `Assignee: ${assigneeLabel}` });
       }
     }
     
@@ -229,13 +233,15 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
       {activeFilters.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
           {activeFilters.map((filter) => (
-            <Badge
+            <button
               key={filter.key}
-              className="bg-blue-50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900"
               onClick={() => handleFilterChange(filter.key as keyof TaskFiltersType, undefined)}
+              className="focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-full"
             >
-              {filter.label} ✕
-            </Badge>
+              <Badge className="bg-blue-50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900">
+                {filter.label} ✕
+              </Badge>
+            </button>
           ))}
         </div>
       )}
@@ -250,8 +256,8 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
                 Status
               </label>
               <Select
-                value={filters.status || ''}
-                onChange={(value) => handleFilterChange('status', value)}
+                value={filters.statuses?.[0] || ''}
+                onChange={(value) => handleFilterChange('statuses', value ? [value] : undefined)}
                 options={statusOptions}
               />
             </div>
@@ -261,8 +267,8 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
                 Priority
               </label>
               <Select
-                value={filters.priority || ''}
-                onChange={(value) => handleFilterChange('priority', value)}
+                value={filters.priorities?.[0] || ''}
+                onChange={(value) => handleFilterChange('priorities', value ? [value] : undefined)}
                 options={priorityOptions}
               />
             </div>
@@ -299,13 +305,13 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
                   Project
                 </label>
                 <Select
-                  value={filters.projectId || ''}
+                  value={filters.projectIds?.[0] || ''}
                   onChange={(value) => {
-                    handleFilterChange('projectId', value);
+                    handleFilterChange('projectIds', value ? [value] : undefined);
                     // Reset board and column when project changes
-                    if (value !== filters.projectId) {
-                      handleFilterChange('boardId', undefined);
-                      handleFilterChange('columnId', undefined);
+                    if (value !== filters.projectIds?.[0]) {
+                      handleFilterChange('boardIds', undefined);
+                      handleFilterChange('columnIds', undefined);
                     }
                   }}
                   options={projectOptions}
@@ -319,16 +325,16 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
                   Board
                 </label>
                 <Select
-                  value={filters.boardId || ''}
+                  value={filters.boardIds?.[0] || ''}
                   onChange={(value) => {
-                    handleFilterChange('boardId', value);
+                    handleFilterChange('boardIds', value ? [value] : undefined);
                     // Reset column when board changes
-                    if (value !== filters.boardId) {
-                      handleFilterChange('columnId', undefined);
+                    if (value !== filters.boardIds?.[0]) {
+                      handleFilterChange('columnIds', undefined);
                     }
                   }}
                   options={boardOptions}
-                  disabled={!filters.projectId && !projectId}
+                  disabled={!filters.projectIds?.[0] && !projectId}
                 />
               </div>
             )}
@@ -339,10 +345,10 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
                   Column
                 </label>
                 <Select
-                  value={filters.columnId || ''}
-                  onChange={(value) => handleFilterChange('columnId', value)}
+                  value={filters.columnIds?.[0] || ''}
+                  onChange={(value) => handleFilterChange('columnIds', value ? [value] : undefined)}
                   options={columnOptions}
-                  disabled={!filters.boardId && !boardId}
+                  disabled={!filters.boardIds?.[0] && !boardId}
                 />
               </div>
             )}
@@ -355,8 +361,8 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
                 Assignee
               </label>
               <Select
-                value={filters.assigneeId || ''}
-                onChange={(value) => handleFilterChange('assigneeId', value)}
+                value={filters.assigneeIds?.[0] || ''}
+                onChange={(value) => handleFilterChange('assigneeIds', value ? [value] : undefined)}
                 options={assigneeOptions}
               />
             </div>
@@ -364,33 +370,49 @@ const TaskFilters: React.FC<TaskFiltersProps> = ({
 
           {/* Fourth Row - Checkboxes */}
           <div className="flex flex-wrap gap-4">
-            <Checkbox
-              id="show-archived"
-              checked={filters.showArchived || false}
-              onChange={(checked) => handleFilterChange('showArchived', checked)}
-              label="Show archived tasks"
-            />
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-archived"
+                checked={filters.showArchived || false}
+                onChange={(checked) => handleBooleanFilterChange('showArchived', checked)}
+              />
+              <label htmlFor="show-archived" className="text-sm text-gray-700 dark:text-gray-300">
+                Show archived tasks
+              </label>
+            </div>
             
-            <Checkbox
-              id="overdue-only"
-              checked={filters.isOverdue || false}
-              onChange={(checked) => handleFilterChange('isOverdue', checked)}
-              label="Overdue tasks only"
-            />
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="overdue-only"
+                checked={filters.isOverdue || false}
+                onChange={(checked) => handleBooleanFilterChange('isOverdue', checked)}
+              />
+              <label htmlFor="overdue-only" className="text-sm text-gray-700 dark:text-gray-300">
+                Overdue tasks only
+              </label>
+            </div>
             
-            <Checkbox
-              id="has-due-date"
-              checked={filters.hasDueDate === true}
-              onChange={(checked) => handleFilterChange('hasDueDate', checked ? true : undefined)}
-              label="Has due date"
-            />
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="has-due-date"
+                checked={filters.hasDueDate === true}
+                onChange={(checked) => handleBooleanFilterChange('hasDueDate', checked ? true : undefined)}
+              />
+              <label htmlFor="has-due-date" className="text-sm text-gray-700 dark:text-gray-300">
+                Has due date
+              </label>
+            </div>
             
-            <Checkbox
-              id="no-due-date"
-              checked={filters.hasDueDate === false}
-              onChange={(checked) => handleFilterChange('hasDueDate', checked ? false : undefined)}
-              label="No due date"
-            />
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="no-due-date"
+                checked={filters.hasDueDate === false}
+                onChange={(checked) => handleBooleanFilterChange('hasDueDate', checked ? false : undefined)}
+              />
+              <label htmlFor="no-due-date" className="text-sm text-gray-700 dark:text-gray-300">
+                No due date
+              </label>
+            </div>
           </div>
         </div>
       )}

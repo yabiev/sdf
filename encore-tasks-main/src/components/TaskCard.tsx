@@ -1,424 +1,460 @@
-"use client";
-
-import React, { memo, useMemo, useCallback, useState } from "react";
-import { useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { Task, TaskPriority } from "@/types";
-import { cn, formatDate, getDaysUntilDeadline, getInitials } from "@/lib/utils";
-import { logTaskDeleted } from "@/utils/taskLogger";
-import {
-  Calendar,
-  MessageSquare,
-  Paperclip,
-  User,
-  AlertTriangle,
+import React, { useState } from 'react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { 
+  MoreHorizontal, 
+  Edit, 
+  Trash2, 
+  Calendar, 
+  User, 
+  Tag, 
   Clock,
-  CheckCircle2,
-  Trash2,
-  Check } from
-"lucide-react";
-import { useApp } from "@/contexts/AppContext";
-import DeleteConfirmationModal from "./DeleteConfirmationModal";
+  CheckCircle,
+  Circle,
+  AlertCircle,
+  Zap
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { EditTaskModal } from './EditTaskModal';
+import { Task } from '@/types';
 
 interface TaskCardProps {
   task: Task;
-  onViewDetails?: () => void;
-  onEdit?: () => void;
+  onTaskUpdated?: (task: Task) => void;
+  onTaskDeleted?: (taskId: string) => void;
+  viewMode?: 'grid' | 'list';
+  currentUserId?: string;
+  canEdit?: boolean;
+  canDelete?: boolean;
   isDragOverlay?: boolean;
 }
 
-// Removed priority colors for left border
+export function TaskCard({ 
+  task, 
+  onTaskUpdated, 
+  onTaskDeleted, 
+  viewMode = 'grid',
+  currentUserId,
+  canEdit = true,
+  canDelete = true,
+  isDragOverlay = false
+}: TaskCardProps) {
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-const statusColors: Record<string, string> = {
-  "todo": "bg-gray-500/10 border-gray-500/20",
-  "in-progress": "bg-blue-500/15 border-blue-500/30",
-  "review": "bg-purple-500/15 border-purple-500/30",
-  "done": "bg-green-500/15 border-green-500/30"
-};
-
-const priorityIcons: Record<TaskPriority, React.ReactNode> = {
-  low: <CheckCircle2 className="w-4 h-4 text-green-400 drop-shadow-sm" data-oid="hklu-g4" />,
-  medium: <Clock className="w-4 h-4 text-yellow-400 drop-shadow-sm" data-oid="rnv5m:0" />,
-  high: <AlertTriangle className="w-4 h-4 text-orange-400 drop-shadow-sm" data-oid="0r:wuf:" />,
-  urgent: <AlertTriangle className="w-4 h-4 text-red-400 drop-shadow-sm animate-pulse" data-oid="ke7azx6" />
-};
-
-const TaskCardComponent = ({ task, onViewDetails, onEdit, isDragOverlay = false }: TaskCardProps) => {
-  const { state, dispatch, deleteTask, updateTask } = useApp();
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  
-  const sortableData = useMemo(() => ({
-    type: "task" as const,
-    task: task
-  }), [task]);
-  
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ 
-    id: task.id,
-    data: sortableData,
-    disabled: isDragOverlay
-  });
-
-  const style = useMemo(() => {
-    if (isDragOverlay) {
-      return {
-        transform: 'none',
-        transition: 'none',
-        cursor: 'grabbing'
-      };
-    }
-    
-    return {
-      transform: CSS.Transform.toString(transform),
-      transition: isDragging ? 'none' : transition,
-      zIndex: isDragging ? 1000 : 'auto',
-      opacity: isDragging ? 0.5 : 1
-    };
-  }, [isDragOverlay, transform, transition, isDragging]);
-
-  const daysUntilDeadline = task.deadline ?
-  getDaysUntilDeadline(task.deadline) :
-  null;
-  const isOverdue = daysUntilDeadline !== null && daysUntilDeadline < 0;
-  const isDueSoon =
-  daysUntilDeadline !== null &&
-  daysUntilDeadline <= 2 &&
-  daysUntilDeadline >= 0;
-
-  const handleDelete = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowDeleteModal(true);
-  }, []);
-
-  const handleConfirmDelete = useCallback(async () => {
-    try {
-      await deleteTask(task.id);
-      
-      // Логирование удаления задачи
-      if (state.currentUser) {
-        const taskAction = logTaskDeleted(
-          dispatch,
-          task.id,
-          state.selectedBoard?.id || '',
-          state.selectedProject?.id || '',
-          task.title,
-          state.currentUser.id,
-          state.currentUser.name
-        );
-      }
-      
-      setShowDeleteModal(false);
-    } catch (error) {
-      console.error('Failed to delete task:', error);
-    }
-  }, [deleteTask, task.id, state.currentUser]);
-
-  const handleCardClick = useCallback((e: React.MouseEvent) => {
-    // Don't trigger onClick if clicking on action buttons or if dragging
-    if ((e.target as HTMLElement).closest(".task-actions") || (e.target as HTMLElement).closest(".task-checkbox") || isDragging) {
+  const handleDelete = async () => {
+    if (!onTaskDeleted || !confirm('Вы уверены, что хотите удалить эту задачу?')) {
       return;
     }
-    onViewDetails?.();
-  }, [onViewDetails, isDragging]);
 
-
-
-  const handleCompleteTask = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
+    setIsDeleting(true);
+    
     try {
-      const newStatus = task.status === 'done' ? 'todo' : 'done';
-      const updatedTask = { ...task, status: newStatus, updatedAt: new Date() };
-      await updateTask(task.id, { status: newStatus });
+      const response = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        toast.success('Задача успешно удалена');
+        onTaskDeleted(task.id);
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.message || 'Ошибка удаления задачи');
+      }
     } catch (error) {
-      console.error('Failed to update task:', error);
+      console.error('Error deleting task:', error);
+      toast.error('Ошибка удаления задачи');
+    } finally {
+      setIsDeleting(false);
     }
-  }, [updateTask, task]);
+  };
 
-  // Handle multiple assignees with backward compatibility
-  const assignees = task.assignees || (task.assignee ? [task.assignee] : []);
+  const handleStatusChange = async (newStatus: Task['status']) => {
+    if (!onTaskUpdated) return;
+    
+    try {
+      const response = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
 
-  return (
-    <div
-      ref={isDragOverlay ? undefined : setNodeRef}
-      style={style}
-      {...(isDragOverlay ? {} : attributes)}
-      {...(isDragOverlay ? {} : listeners)}
-      className={cn(
-        "group relative cursor-pointer task-card hover-lift animate-scale-in backdrop-blur-xl border rounded-xl p-4 transition-all duration-300",
-        statusColors[task.status] || "bg-white/5 border-white/10",
-        task.status === 'done' && "opacity-70 saturate-75 contrast-90",
-        isDragging && "opacity-50 shadow-2xl scale-105 rotate-2 bg-white/20",
-        "hover:shadow-lg hover:scale-[1.02]"
-      )}
-      onClick={handleCardClick}
-      data-oid="quv.626">
-
-      {/* Subtasks counter */}
-      {task.subtasks.length > 0 &&
-      <div className="flex justify-end mb-1">
-        <div className="text-xs text-gray-400" data-oid="kathmuh">
-          {task.subtasks.filter((st) => st.status === "done").length}/
-          {task.subtasks.length}
-        </div>
-      </div>
+      if (response.ok) {
+        const updatedTask = await response.json();
+        toast.success('Статус задачи обновлен');
+        onTaskUpdated(updatedTask);
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.message || 'Ошибка обновления статуса');
       }
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      toast.error('Ошибка обновления статуса');
+    }
+  };
 
-      {/* Task title with checkbox and actions */}
-      <div className="flex items-start gap-2 mb-2">
-        <button
-          onClick={handleCompleteTask}
-          className={cn(
-            "task-checkbox w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all flex-shrink-0 mt-0.5",
-            task.status === 'done' 
-              ? "bg-green-500 border-green-500 text-white" 
-              : "border-gray-400 hover:border-green-400"
-          )}
-          title={task.status === 'done' ? "Отметить как невыполненную" : "Отметить как выполненную"}
-        >
-          {task.status === 'done' && <Check className="w-3 h-3" />}
-        </button>
-        <h3
-          className={cn(
-            "text-sm font-medium line-clamp-2 flex-1",
-            task.status === 'done' ? "text-gray-300" : "text-white"
-          )}
-          data-oid="fq7kujc">
-          {task.title}
-        </h3>
-        
-        {/* Task actions */}
-        <div className="task-actions flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-          {/* Only task creator, admins, or managers can delete tasks */}
-          {(state.currentUser?.id === task.reporter.id || 
-            state.currentUser?.role === 'admin' || 
-            state.currentUser?.role === 'manager') && (
-            <button
-              onClick={handleDelete}
-              className="p-1 hover:bg-primary-500/20 rounded transition-colors"
-              title="Удалить задачу"
-              data-oid="delete-btn">
-              <Trash2 className="w-3 h-3 text-red-400" />
-            </button>
-          )}
-        </div>
-      </div>
+  const priorityConfig = {
+    low: { 
+      color: 'bg-green-100 text-green-800 border-green-200', 
+      icon: Circle, 
+      label: 'Низкий' 
+    },
+    medium: { 
+      color: 'bg-yellow-100 text-yellow-800 border-yellow-200', 
+      icon: AlertCircle, 
+      label: 'Средний' 
+    },
+    high: { 
+      color: 'bg-orange-100 text-orange-800 border-orange-200', 
+      icon: AlertCircle, 
+      label: 'Высокий' 
+    },
+    urgent: { 
+      color: 'bg-red-100 text-red-800 border-red-200', 
+      icon: Zap, 
+      label: 'Срочный' 
+    }
+  };
 
-      {/* Task description */}
-      {task.description &&
-      <p
-        className={cn(
-          "text-xs mb-3 line-clamp-2",
-          task.status === 'done' ? "text-gray-500" : "text-gray-400"
-        )}
-        data-oid="soff5zg">
+  const statusConfig = {
+    todo: { 
+      color: 'bg-gray-100 text-gray-800 border-gray-200', 
+      icon: Circle, 
+      label: 'К выполнению' 
+    },
+    in_progress: { 
+      color: 'bg-blue-100 text-blue-800 border-blue-200', 
+      icon: Clock, 
+      label: 'В работе' 
+    },
+    review: { 
+      color: 'bg-purple-100 text-purple-800 border-purple-200', 
+      icon: AlertCircle, 
+      label: 'На проверке' 
+    },
+    done: { 
+      color: 'bg-green-100 text-green-800 border-green-200', 
+      icon: CheckCircle, 
+      label: 'Выполнено' 
+    },
+    blocked: { 
+      color: 'bg-red-100 text-red-800 border-red-200', 
+      icon: AlertCircle, 
+      label: 'Заблокировано' 
+    }
+  };
 
-          {task.description}
-        </p>
-      }
+  const PriorityIcon = priorityConfig[task.priority].icon;
+  const StatusIcon = statusConfig[task.status].icon;
 
-      {/* Tags */}
-      {task.tags?.length > 0 &&
-      <div className="flex flex-wrap gap-1 mb-3" data-oid="l6a3ze.">
-          {task.tags?.slice(0, 3).map((tag, index) =>
-        <span
-          key={`${task.id}-tag-${index}`}
-          className="px-2 py-1 text-xs bg-primary-500/20 text-primary-300 rounded-full"
-          data-oid="1.37n8b">
+  const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'done';
+  const isDueSoon = task.due_date && !isOverdue && 
+    new Date(task.due_date).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000;
 
-              {tag}
-            </span>
-        )}
-          {task.tags?.length > 3 &&
-        <span
-          className="px-2 py-1 text-xs bg-gray-500/20 text-gray-400 rounded-full"
-          data-oid="g0ql3g:">
+  // Check permissions
+  const isCreator = currentUserId === task.creator_id;
+  const isAssignee = task.assignees?.some(assignee => assignee.id === currentUserId) || false;
+  const canEditTask = canEdit && (isCreator || isAssignee);
+  const canDeleteTask = canDelete && isCreator;
 
-              +{task.tags.length - 3}
-            </span>
-        }
-        </div>
-      }
+  if (viewMode === 'list') {
+    return (
+      <>
+        <Card className={`hover:shadow-md transition-shadow ${
+          isOverdue ? 'border-red-300 bg-red-50' : 
+          isDueSoon ? 'border-yellow-300 bg-yellow-50' : ''
+        }`}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4 flex-1">
+                {/* Status Icon */}
+                <button
+                  onClick={() => {
+                    const statuses: Task['status'][] = ['todo', 'in_progress', 'review', 'done', 'blocked'];
+                    const currentIndex = statuses.indexOf(task.status);
+                    const nextStatus = statuses[(currentIndex + 1) % statuses.length];
+                    handleStatusChange(nextStatus);
+                  }}
+                  className="flex-shrink-0 hover:scale-110 transition-transform"
+                  title="Изменить статус"
+                >
+                  <StatusIcon className={`h-5 w-5 ${
+                    task.status === 'done' ? 'text-green-600' : 'text-gray-400'
+                  }`} />
+                </button>
 
-      {/* Deadline */}
-      {task.deadline &&
-      <div
-        className={cn(
-          "flex items-center gap-1 mb-2 text-xs",
-          isOverdue && "text-red-400",
-          isDueSoon && "text-yellow-400",
-          !isOverdue && !isDueSoon && "text-gray-400"
-        )}
-        data-oid="73h4pgz">
-
-          <Calendar className="w-3 h-3" data-oid="-.8767z" />
-          <span data-oid="d69j4.m">{!isNaN(new Date(task.deadline).getTime()) ? formatDate(new Date(task.deadline)) : 'Неверная дата'}</span>
-          {isOverdue &&
-        <span className="text-red-400" data-oid="9lat1ca">
-              (просрочено)
-            </span>
-        }
-          {isDueSoon &&
-        <span className="text-yellow-400" data-oid="9liw4fa">
-              ({Math.abs(daysUntilDeadline!)} дн.)
-            </span>
-        }
-        </div>
-      }
-
-      {/* Bottom section */}
-      <div className="flex items-center justify-between" data-oid="qmks2-3">
-        {/* Assignees */}
-        <div className="flex items-center gap-2" data-oid="yid2xpu">
-          {assignees.length > 0 ?
-          <div className="flex items-center gap-1" data-oid="adz7fpr">
-              {/* Show avatars for multiple assignees */}
-              {state.settings?.showAvatars && (
-                <div className="flex -space-x-1" data-oid="4z3qxlj">
-                  {assignees.slice(0, 3).map((assignee, index) =>
-                <div
-                  key={assignee.id}
-                  className="relative"
-                  data-oid="6vc888p">
-
-                      {assignee.avatar ?
-                  <img
-                    src={assignee.avatar}
-                    alt={assignee.name}
-                    className="w-5 h-5 lg:w-6 lg:h-6 rounded-full border border-white/20"
-                    title={assignee.name}
-                    data-oid="_id-0_w" /> :
-
-
-                  <div
-                    className="w-5 h-5 lg:w-6 lg:h-6 bg-primary-500 rounded-full flex items-center justify-center text-xs text-white border border-white/20"
-                    title={assignee.name}
-                    data-oid="omx5dpx">
-
-                          {getInitials(assignee.name)}
-                        </div>
-                  }
-                    </div>
-                )}
-                  {assignees.length > 3 &&
-                <div
-                  className="w-6 h-6 bg-gray-500 rounded-full flex items-center justify-center text-xs text-white border border-white/20"
-                  title={`+${assignees.length - 3} еще`}
-                  data-oid="hs5ik9.">
-
-                      +{assignees.length - 3}
-                    </div>
-                }
+                {/* Task Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <h3 className="font-medium text-gray-900 truncate">{task.title}</h3>
+                    <Badge className={priorityConfig[task.priority].color}>
+                      <PriorityIcon className="h-3 w-3 mr-1" />
+                      {priorityConfig[task.priority].label}
+                    </Badge>
+                    <Badge className={statusConfig[task.status].color}>
+                      {statusConfig[task.status].label}
+                    </Badge>
+                  </div>
+                  
+                  {task.description && (
+                    <p className="text-sm text-gray-600 truncate mb-1">{task.description}</p>
+                  )}
+                  
+                  <div className="flex items-center space-x-4 text-xs text-gray-500">
+                    <span>{task.column_name}</span>
+                    <span>{task.board_name}</span>
+                    <span>Создал: {task.creator_username}</span>
+                    {task.due_date && (
+                      <span className={`flex items-center space-x-1 ${
+                        isOverdue ? 'text-red-600 font-medium' :
+                        isDueSoon ? 'text-yellow-600 font-medium' : ''
+                      }`}>
+                        <Calendar className="h-3 w-3" />
+                        <span>{new Date(task.due_date).toLocaleDateString('ru-RU')}</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
+
+                {/* Assignees */}
+                {task.assignees && task.assignees.length > 0 && (
+                  <div className="flex items-center space-x-1">
+                    <User className="h-4 w-4 text-gray-400" />
+                    <div className="flex -space-x-1">
+                      {task.assignees.slice(0, 3).map((assignee, index) => (
+                        <div
+                          key={assignee.id}
+                          className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center border-2 border-white"
+                          title={assignee.name}
+                        >
+                          {assignee.name.charAt(0).toUpperCase()}
+                        </div>
+                      ))}
+                      {task.assignees.length > 3 && (
+                        <div className="w-6 h-6 rounded-full bg-gray-500 text-white text-xs flex items-center justify-center border-2 border-white">
+                          +{task.assignees.length - 3}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tags */}
+                {task.tags && task.tags.length > 0 && (
+                  <div className="flex items-center space-x-1">
+                    <Tag className="h-4 w-4 text-gray-400" />
+                    <div className="flex space-x-1">
+                      {task.tags.slice(0, 2).map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-xs">
+                          {tag}
+                        </Badge>
+                      ))}
+                      {task.tags.length > 2 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{task.tags.length - 2}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              {(canEditTask || canDeleteTask) && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {canEditTask && (
+                      <DropdownMenuItem onClick={() => setIsEditModalOpen(true)}>
+                        <Edit className="h-4 w-4 mr-2" />
+                        Редактировать
+                      </DropdownMenuItem>
+                    )}
+                    {canDeleteTask && (
+                      <DropdownMenuItem 
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                        className="text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        {isDeleting ? 'Удаление...' : 'Удалить'}
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
-              {/* Show name only for single assignee */}
-              {assignees.length === 1 &&
-            <span
-              className="text-xs text-gray-400 hidden sm:inline"
-              data-oid="3q8q4kj">
-
-                  {assignees.length > 0 ? assignees[0].name.split(" ")[0] : 'Не назначен'}
-                </span>
-            }
-              {/* Show count for multiple assignees */}
-              {assignees.length > 1 &&
-            <span
-              className="text-xs text-gray-400 hidden sm:inline"
-              data-oid="c4igr7q">
-
-                  {assignees.length} исп.
-                </span>
-            }
-            </div> :
-
-          <div
-            className="flex items-center gap-1 text-gray-500"
-            data-oid="7jmjpnf">
-
-              <User className="w-3 h-3 lg:w-4 lg:h-4" data-oid="y87f1.0" />
-              <span className="text-xs" data-oid="uvmeo5a">
-                Не назначено
-              </span>
             </div>
-          }
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Attachments, comments and priority */}
-        <div className="flex items-center gap-2" data-oid="wx2esgm">
-          {task.attachments.length > 0 &&
-          <div
-            className="flex items-center gap-1 text-gray-400"
-            data-oid="t.c6u7s">
+        {isEditModalOpen && (
+          <EditTaskModal
+            isOpen={isEditModalOpen}
+            onClose={() => setIsEditModalOpen(false)}
+            onTaskUpdated={onTaskUpdated}
+            task={task}
+          />
+        )}
+      </>
+    );
+  }
 
-              <Paperclip className="w-3 h-3" data-oid="zzl-zwp" />
-              <span className="text-xs" data-oid="k2t-5rf">
-                {task.attachments.length}
-              </span>
-            </div>
-          }
-          {task.comments.length > 0 &&
-          <div
-            className="flex items-center gap-1 text-gray-400"
-            data-oid="a50y8rh">
-
-              <MessageSquare className="w-3 h-3" data-oid="tqxpzuv" />
-              <span className="text-xs" data-oid="4ngdj-7">
-                {task.comments.length}
-              </span>
-            </div>
-          }
-          {/* Priority icon */}
-          <div 
-            className="flex items-center ml-auto"
-            title={`Приоритет: ${task.priority === 'low' ? 'низкий' : task.priority === 'medium' ? 'средний' : task.priority === 'high' ? 'высокий' : 'срочный'}`}
-          >
-            {priorityIcons[task.priority]}
-          </div>
-        </div>
-      </div>
-
-      {/* Hover overlay */}
-      <div
-        className="absolute inset-0 bg-gradient-to-r from-primary-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-lg pointer-events-none"
-        data-oid="n-:kn_p" />
-
-      {/* Темно-зеленое перекрытие для выполненных задач */}
-      {task.status === "done" && (
-        <div className="absolute inset-0 bg-primary-900/20 rounded-lg pointer-events-none" />
-      )}
-
-      {/* Delete Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        onConfirm={handleConfirmDelete}
-        title="Удаление задачи"
-        message={`Вы уверены, что хотите удалить задачу "${task.title}"? Это действие нельзя отменить.`}
-      />
-    </div>);
-
-};
-
-// Мемоизированный экспорт для оптимизации производительности
-export const TaskCard = memo(TaskCardComponent, (prevProps, nextProps) => {
-  // Сравниваем только необходимые свойства для предотвращения лишних рендеров
+  // Grid view
   return (
-    prevProps.task.id === nextProps.task.id &&
-    prevProps.task.title === nextProps.task.title &&
-    prevProps.task.status === nextProps.task.status &&
-    prevProps.task.priority === nextProps.task.priority &&
-    prevProps.task.deadline === nextProps.task.deadline &&
-    prevProps.task.assignee === nextProps.task.assignee &&
-    JSON.stringify(prevProps.task.assignees) === JSON.stringify(nextProps.task.assignees) &&
-    prevProps.task.attachments.length === nextProps.task.attachments.length &&
-    prevProps.task.comments.length === nextProps.task.comments.length &&
-    prevProps.isDragOverlay === nextProps.isDragOverlay &&
-    prevProps.onViewDetails === nextProps.onViewDetails &&
-    prevProps.onEdit === nextProps.onEdit
+    <>
+      <Card className={`hover:shadow-lg transition-all duration-200 cursor-pointer ${
+        isOverdue ? 'border-red-300 bg-red-50' : 
+        isDueSoon ? 'border-yellow-300 bg-yellow-50' : ''
+      }`}>
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  const statuses: Task['status'][] = ['todo', 'in_progress', 'review', 'done', 'blocked'];
+                  const currentIndex = statuses.indexOf(task.status);
+                  const nextStatus = statuses[(currentIndex + 1) % statuses.length];
+                  handleStatusChange(nextStatus);
+                }}
+                className="flex-shrink-0 hover:scale-110 transition-transform"
+                title="Изменить статус"
+              >
+                <StatusIcon className={`h-5 w-5 ${
+                  task.status === 'done' ? 'text-green-600' : 'text-gray-400'
+                }`} />
+              </button>
+              <h3 className="font-semibold text-gray-900 line-clamp-2">{task.title}</h3>
+            </div>
+            
+            {(canEditTask || canDeleteTask) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {canEditTask && (
+                    <DropdownMenuItem onClick={() => setIsEditModalOpen(true)}>
+                      <Edit className="h-4 w-4 mr-2" />
+                      Редактировать
+                    </DropdownMenuItem>
+                  )}
+                  {canDeleteTask && (
+                    <DropdownMenuItem 
+                      onClick={handleDelete}
+                      disabled={isDeleting}
+                      className="text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      {isDeleting ? 'Удаление...' : 'Удалить'}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </CardHeader>
+        
+        <CardContent className="pt-0">
+          {task.description && (
+            <p className="text-sm text-gray-600 mb-3 line-clamp-2">{task.description}</p>
+          )}
+          
+          {/* Priority and Status */}
+          <div className="flex items-center space-x-2 mb-3">
+            <Badge className={priorityConfig[task.priority].color}>
+              <PriorityIcon className="h-3 w-3 mr-1" />
+              {priorityConfig[task.priority].label}
+            </Badge>
+            <Badge className={statusConfig[task.status].color}>
+              {statusConfig[task.status].label}
+            </Badge>
+          </div>
+          
+          {/* Due Date */}
+          {task.due_date && (
+            <div className={`flex items-center space-x-1 text-sm mb-3 ${
+              isOverdue ? 'text-red-600 font-medium' :
+              isDueSoon ? 'text-yellow-600 font-medium' : 'text-gray-600'
+            }`}>
+              <Calendar className="h-4 w-4" />
+              <span>{new Date(task.due_date).toLocaleDateString('ru-RU')}</span>
+              {isOverdue && <span className="text-xs">(просрочено)</span>}
+              {isDueSoon && <span className="text-xs">(скоро)</span>}
+            </div>
+          )}
+          
+          {/* Assignees */}
+          {task.assignees && task.assignees.length > 0 && (
+            <div className="flex items-center space-x-2 mb-3">
+              <User className="h-4 w-4 text-gray-400" />
+              <div className="flex -space-x-1">
+                {task.assignees.slice(0, 3).map((assignee) => (
+                  <div
+                    key={assignee.id}
+                    className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center border-2 border-white"
+                    title={assignee.name}
+                  >
+                    {assignee.name.charAt(0).toUpperCase()}
+                  </div>
+                ))}
+                {task.assignees.length > 3 && (
+                  <div className="w-6 h-6 rounded-full bg-gray-500 text-white text-xs flex items-center justify-center border-2 border-white">
+                    +{task.assignees.length - 3}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {/* Tags */}
+          {task.tags && task.tags.length > 0 && (
+            <div className="flex items-center space-x-1 mb-3">
+              <Tag className="h-4 w-4 text-gray-400" />
+              <div className="flex flex-wrap gap-1">
+                {task.tags.slice(0, 3).map((tag) => (
+                  <Badge key={tag} variant="outline" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+                {task.tags.length > 3 && (
+                  <Badge variant="outline" className="text-xs">
+                    +{task.tags.length - 3}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {/* Meta Info */}
+          <div className="text-xs text-gray-500 space-y-1">
+            <div>{task.column_name} • {task.board_name}</div>
+            <div>Создал: {task.creator_username}</div>
+            <div>Создано: {new Date(task.created_at).toLocaleDateString('ru-RU')}</div>
+            {task.updated_at !== task.created_at && (
+              <div>Обновлено: {new Date(task.updated_at).toLocaleDateString('ru-RU')}</div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {isEditModalOpen && (
+        <EditTaskModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          onTaskUpdated={onTaskUpdated}
+          task={task}
+        />
+      )}
+    </>
   );
-});
+}

@@ -46,7 +46,7 @@ export class UserRepository implements IUserRepository {
   ): Promise<User[]> {
     try {
       let sql = 'SELECT * FROM users WHERE 1=1';
-      const params: any[] = [];
+      const params: unknown[] = [];
 
       // Apply filters
       if (filters?.query) {
@@ -92,7 +92,7 @@ export class UserRepository implements IUserRepository {
     }
   }
 
-  async create(user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
+  async create(user: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User> {
     try {
       const id = generateId();
       const now = new Date();
@@ -101,13 +101,11 @@ export class UserRepository implements IUserRepository {
         id,
         name: user.name,
         email: user.email,
-        password_hash: user.passwordHash,
+        password_hash: user.password_hash,
         avatar: user.avatar || null,
         role: user.role || 'user',
-        is_active: user.isActive !== false ? 1 : 0,
-        email_verified: user.emailVerified ? 1 : 0,
-        preferences: JSON.stringify(user.preferences || {}),
-        last_login_at: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
+        is_active: user.isApproved !== false ? 1 : 0,
+        last_login_at: user.lastLoginAt || null,
         created_at: now.toISOString(),
         updated_at: now.toISOString()
       };
@@ -121,17 +119,15 @@ export class UserRepository implements IUserRepository {
 
   async update(id: string, updates: Partial<User>): Promise<User> {
     try {
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, unknown> = {};
 
       if (updates.name !== undefined) updateData.name = updates.name;
       if (updates.email !== undefined) updateData.email = updates.email;
-      if (updates.passwordHash !== undefined) updateData.password_hash = updates.passwordHash;
+      if (updates.password_hash !== undefined) updateData.password_hash = updates.password_hash;
       if (updates.avatar !== undefined) updateData.avatar = updates.avatar;
       if (updates.role !== undefined) updateData.role = updates.role;
-      if (updates.isActive !== undefined) updateData.is_active = updates.isActive ? 1 : 0;
-      if (updates.emailVerified !== undefined) updateData.email_verified = updates.emailVerified ? 1 : 0;
-      if (updates.preferences !== undefined) updateData.preferences = JSON.stringify(updates.preferences);
-      if (updates.lastLoginAt !== undefined) updateData.last_login_at = updates.lastLoginAt ? updates.lastLoginAt.toISOString() : null;
+      if (updates.isApproved !== undefined) updateData.is_active = updates.isApproved ? 1 : 0;
+      if (updates.lastLoginAt !== undefined) updateData.last_login_at = updates.lastLoginAt;
 
       updateData.updated_at = new Date().toISOString();
 
@@ -181,7 +177,7 @@ export class UserRepository implements IUserRepository {
     }
   }
 
-  async updatePreferences(id: string, preferences: Record<string, any>): Promise<User> {
+  async updatePreferences(id: string, preferences: Record<string, unknown>): Promise<User> {
     try {
       await databaseAdapter.update(this.tableName, id, {
         preferences: JSON.stringify(preferences),
@@ -207,7 +203,7 @@ export class UserRepository implements IUserRepository {
   async deactivate(id: string): Promise<void> {
     try {
       await databaseAdapter.update(this.tableName, id, {
-        is_active: 0,
+        is_approved: 0,
         updated_at: new Date().toISOString()
       });
     } catch (error) {
@@ -218,7 +214,7 @@ export class UserRepository implements IUserRepository {
   async activate(id: string): Promise<void> {
     try {
       await databaseAdapter.update(this.tableName, id, {
-        is_active: 1,
+        is_approved: 1,
         updated_at: new Date().toISOString()
       });
     } catch (error) {
@@ -263,11 +259,11 @@ export class UserRepository implements IUserRepository {
       if (!row) return null;
 
       return {
-        id: row.id,
-        userId: row.user_id,
-        expiresAt: new Date(row.expires_at),
-        userAgent: row.user_agent,
-        ipAddress: row.ip_address
+        id: row.id as string,
+        userId: row.user_id as string,
+        expiresAt: new Date(row.expires_at as string),
+        userAgent: row.user_agent as string,
+        ipAddress: row.ip_address as string
       };
     } catch (error) {
       throw new Error(`Failed to find session by token: ${error}`);
@@ -316,30 +312,28 @@ export class UserRepository implements IUserRepository {
       const result = await databaseAdapter.queryOne(sql, [id, id, id, id]);
       
       return {
-        totalProjects: result?.total_projects || 0,
-        totalTasks: result?.total_tasks || 0,
-        completedTasks: result?.completed_tasks || 0,
-        overdueTasks: result?.overdue_tasks || 0
+        totalProjects: (result?.total_projects as number) || 0,
+        totalTasks: (result?.total_tasks as number) || 0,
+        completedTasks: (result?.completed_tasks as number) || 0,
+        overdueTasks: (result?.overdue_tasks as number) || 0
       };
     } catch (error) {
       throw new Error(`Failed to get user stats: ${error}`);
     }
   }
 
-  private transformToUser(row: any): User {
+  private transformToUser(row: Record<string, unknown>): User {
     return {
-      id: row.id,
-      name: row.name,
-      email: row.email,
-      passwordHash: row.password_hash,
-      avatar: row.avatar,
-      role: row.role,
-      isActive: Boolean(row.is_active),
-      emailVerified: Boolean(row.email_verified),
-      preferences: JSON.parse(row.preferences || '{}'),
-      lastLoginAt: row.last_login_at ? new Date(row.last_login_at) : undefined,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at)
+      id: row.id as string,
+      name: row.name as string,
+      email: row.email as string,
+      password_hash: row.password_hash as string,
+      avatar: row.avatar as string,
+      role: row.role as 'admin' | 'manager' | 'user',
+      isApproved: Boolean(row.is_approved),
+      lastLoginAt: row.last_login_at ? new Date(row.last_login_at as string) : undefined,
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string)
     };
   }
 }

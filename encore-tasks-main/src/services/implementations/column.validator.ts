@@ -4,14 +4,13 @@
  */
 
 import {
-  Column,
   ColumnId,
   BoardId,
   CreateColumnDto,
   UpdateColumnDto,
   ValidationResult,
   ValidationError
-} from '../../types/board.types';
+} from '../../refactored/data/types';
 
 import { IColumnValidator } from '../interfaces/column.service.interface';
 
@@ -372,7 +371,7 @@ export class ColumnValidator implements IColumnValidator {
     };
   }
 
-  private validateColumnSettings(settings: Record<string, any>): ValidationResult {
+  private validateColumnSettings(settings: Record<string, unknown>): ValidationResult {
     const errors: ValidationError[] = [];
 
     // Валидация автоматических правил

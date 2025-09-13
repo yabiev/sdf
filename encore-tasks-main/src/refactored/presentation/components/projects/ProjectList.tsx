@@ -2,12 +2,12 @@
 // Displays a list of projects with filtering, sorting, and actions
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Project, SearchFilters, SortOptions, PaginationOptions } from '../../../data/types';
+import { Project, SortOptions, PaginationOptions, TaskPriority, ProjectRole, UpdateProjectData, ProjectStatus, ProjectSortBy, SortOrder } from '../../../data/types';
 import { useProjects } from '../../hooks/useProjects';
 import { useAuth } from '../../context/AuthContext';
 import { ProjectCard } from './ProjectCard';
 import { ProjectFilters } from './ProjectFilters';
-import { CreateProjectModal } from './CreateProjectModal';
+import { CreateProjectModal } from '../../../../components/CreateProjectModal';
 import { LoadingSpinner } from '../common/LoadingSpinner';
 import { ErrorMessage } from '../common/ErrorMessage';
 import { EmptyState } from '../common/EmptyState';
@@ -31,11 +31,14 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   className = ''
 }) => {
   const { user } = useAuth();
-  const [filters, setFilters] = useState<SearchFilters>({});
-  const [sort, setSort] = useState<SortOptions>({
-    field: 'updatedAt',
-    direction: 'desc'
-  });
+  const [filters, setFilters] = useState<{
+    status?: ProjectStatus;
+    search?: string;
+    sortBy?: ProjectSortBy;
+    sortOrder?: SortOrder;
+    showArchived?: boolean;
+  }>({});
+
   const [pagination, setPagination] = useState<PaginationOptions>({
     page: 1,
     limit: pageSize
@@ -45,10 +48,10 @@ export const ProjectList: React.FC<ProjectListProps> = ({
 
   const {
     projects,
-    loading,
+    isLoading,
     error,
     totalCount,
-    fetchProjects,
+    loadProjects,
     createProject,
     updateProject,
     deleteProject,
@@ -56,13 +59,13 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     restoreProject
   } = useProjects();
 
-  // Fetch projects when filters, sort, or pagination change
+  // Fetch projects when filters or pagination change
   useEffect(() => {
     const targetUserId = userId || user?.id;
     if (targetUserId) {
-      fetchProjects(targetUserId, filters, sort, pagination);
+      loadProjects();
     }
-  }, [userId, user?.id, filters, sort, pagination, fetchProjects]);
+  }, [userId, user?.id, filters, pagination, loadProjects]);
 
   // Handle search with debouncing
   useEffect(() => {
@@ -71,6 +74,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
         setFilters(prev => ({ ...prev, search: searchQuery.trim() }));
       } else {
         setFilters(prev => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { search, ...rest } = prev;
           return rest;
         });
@@ -80,43 +84,90 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     return () => clearTimeout(timeoutId);
   }, [searchQuery]);
 
-  const handleFilterChange = useCallback((newFilters: Partial<SearchFilters>) => {
+  const handleFilterChange = useCallback((newFilters: Partial<{
+    status?: ProjectStatus;
+    search?: string;
+    sortBy?: ProjectSortBy;
+    sortOrder?: SortOrder;
+    showArchived?: boolean;
+  }>) => {
     setFilters(prev => ({ ...prev, ...newFilters }));
     setPagination(prev => ({ ...prev, page: 1 })); // Reset to first page
   }, []);
 
-  const handleSortChange = useCallback((newSort: SortOptions) => {
-    setSort(newSort);
-    setPagination(prev => ({ ...prev, page: 1 })); // Reset to first page
+  const handleReset = useCallback(() => {
+    setFilters({});
+    setSearchQuery('');
+    setPagination(prev => ({ ...prev, page: 1 }));
   }, []);
 
   const handlePageChange = useCallback((page: number) => {
     setPagination(prev => ({ ...prev, page }));
   }, []);
 
-  const handleCreateProject = useCallback(async (projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const handleCreateProject = useCallback(async (projectData: { name: string; description?: string; color: string; members?: Array<{ userId?: string; id?: string; role?: string }> }) => {
     try {
-      await createProject(projectData);
+      // Transform data from CreateProjectModal format to Project format
+      const transformedData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'> = {
+        name: projectData.name,
+        description: projectData.description || '',
+        color: projectData.color,
+        ownerId: user?.id || '',
+        isArchived: false,
+        settings: {
+          isPublic: false,
+          allowGuestAccess: false,
+          defaultTaskPriority: 'medium' as TaskPriority,
+          autoArchiveCompletedTasks: false,
+          enableTimeTracking: true,
+          enableDependencies: true
+        },
+        members: projectData.members?.filter((member: { userId?: string; id?: string; role?: string }) => 
+          member.userId || member.id
+        ).map((member: { userId?: string; id?: string; role?: string }) => ({
+          userId: (member.userId || member.id)!,
+          role: (member.role as ProjectRole) || 'member',
+          joinedAt: new Date(),
+          permissions: {
+            canCreateBoards: member.role === 'owner' || member.role === 'admin',
+            canEditProject: member.role === 'owner' || member.role === 'admin',
+            canManageMembers: member.role === 'owner',
+            canDeleteProject: member.role === 'owner',
+            canArchiveProject: member.role === 'owner' || member.role === 'admin'
+          }
+        })) || [],
+        statistics: {
+          totalBoards: 0,
+          totalTasks: 0,
+          completedTasks: 0,
+          overdueTasks: 0,
+          activeMembersCount: projectData.members?.length || 1
+        }
+      };
+
+      await createProject(transformedData);
       setIsCreateModalOpen(false);
       // Refresh the list
       const targetUserId = userId || user?.id;
       if (targetUserId) {
-        fetchProjects(targetUserId, filters, sort, pagination);
+        loadProjects();
       }
     } catch (error) {
       console.error('Failed to create project:', error);
     }
-  }, [createProject, userId, user?.id, filters, sort, pagination, fetchProjects]);
+  }, [createProject, userId, user?.id, loadProjects]);
 
   const handleProjectAction = useCallback(async (
     action: 'update' | 'delete' | 'archive' | 'restore',
     projectId: string,
-    data?: any
+    data?: Partial<Project>
   ) => {
     try {
       switch (action) {
         case 'update':
-          await updateProject(projectId, data);
+          if (data) {
+            await updateProject(projectId, data as UpdateProjectData);
+          }
           break;
         case 'delete':
           await deleteProject(projectId);
@@ -132,17 +183,17 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       // Refresh the list
       const targetUserId = userId || user?.id;
       if (targetUserId) {
-        fetchProjects(targetUserId, filters, sort, pagination);
+        loadProjects();
       }
     } catch (error) {
       console.error(`Failed to ${action} project:`, error);
     }
-  }, [updateProject, deleteProject, archiveProject, restoreProject, userId, user?.id, filters, sort, pagination, fetchProjects]);
+  }, [updateProject, deleteProject, archiveProject, restoreProject, userId, user?.id, loadProjects]);
 
   const totalPages = Math.ceil(totalCount / pageSize);
   const canCreateProject = user && showCreateButton;
 
-  if (loading && projects.length === 0) {
+  if (isLoading && projects.length === 0) {
     return (
       <div className={`flex justify-center items-center min-h-64 ${className}`}>
         <LoadingSpinner size="lg" />
@@ -155,11 +206,11 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       <div className={className}>
         <ErrorMessage 
           message="Failed to load projects" 
-          details={error.message}
+          details={error}
           onRetry={() => {
             const targetUserId = userId || user?.id;
             if (targetUserId) {
-              fetchProjects(targetUserId, filters, sort, pagination);
+              loadProjects();
             }
           }}
         />
@@ -215,9 +266,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({
           {/* Filters */}
           <ProjectFilters
             filters={filters}
-            sort={sort}
-            onFilterChange={handleFilterChange}
-            onSortChange={handleSortChange}
+            onFiltersChange={handleFilterChange}
+            onReset={handleReset}
           />
         </div>
       )}
@@ -254,7 +304,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       )}
 
       {/* Loading overlay for subsequent loads */}
-      {loading && projects.length > 0 && (
+      {isLoading && projects.length > 0 && (
         <div className="flex justify-center py-4">
           <LoadingSpinner size="sm" />
         </div>
@@ -267,8 +317,6 @@ export const ProjectList: React.FC<ProjectListProps> = ({
             currentPage={pagination.page}
             totalPages={totalPages}
             onPageChange={handlePageChange}
-            showPageNumbers={true}
-            maxVisiblePages={5}
           />
         </div>
       )}

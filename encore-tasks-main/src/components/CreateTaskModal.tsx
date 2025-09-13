@@ -1,322 +1,377 @@
-"use client";
-
-import React, { useState } from "react";
-import { Task, TaskPriority, User } from "@/types";
-import { useApp } from "@/contexts/AppContext";
-import { cn } from "@/lib/utils";
-import { X, Calendar, User as UserIcon, Flag, Plus, Save } from "lucide-react";
-import { CustomSelect } from "./CustomSelect";
+import React, { useState, useEffect } from 'react';
+import { X, Calendar, Users, Flag, Paperclip, Plus } from 'lucide-react';
+import { Task, User, Project } from '@/types';
+import { format } from 'date-fns';
 
 interface CreateTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (task: Omit<Task, "id" | "createdAt" | "updatedAt">) => void;
-  initialStatus?: string;
+  onSubmit: (taskData: Partial<Task>) => Promise<void>;
+  project: Project;
+  columnId: number;
+  projectUsers: User[];
 }
 
-const priorityOptions: {value: TaskPriority;label: string;color: string;}[] =
-[
-{ value: "low", label: "Низкий", color: "text-green-500" },
-{ value: "medium", label: "Средний", color: "text-yellow-500" },
-{ value: "high", label: "Высокий", color: "text-orange-500" },
-{ value: "urgent", label: "Срочный", color: "text-red-500" }];
+interface TaskFormData {
+  title: string;
+  description: string;
+  priority: Task['priority'];
+  dueDate: string;
+  assigneeIds: number[];
+  tags: string[];
+  estimatedHours: number | null;
+}
 
+const PRIORITY_OPTIONS = [
+  { value: 'LOW', label: 'Низкий', color: 'text-green-600 bg-green-100' },
+  { value: 'MEDIUM', label: 'Средний', color: 'text-yellow-600 bg-yellow-100' },
+  { value: 'HIGH', label: 'Высокий', color: 'text-orange-600 bg-orange-100' },
+  { value: 'URGENT', label: 'Срочный', color: 'text-red-600 bg-red-100' },
+] as const;
 
-const statusMapping: Record<string, string> = {
-  "1": "todo",
-  "2": "in-progress",
-  "3": "review",
-  "4": "done"
-};
-
-export function CreateTaskModal({
+const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   isOpen,
   onClose,
-  onSave,
-  initialStatus = "todo"
-}: CreateTaskModalProps) {
-  const { state, createTask } = useApp();
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    priority: "medium" as TaskPriority,
-    assigneeId: "",
-    deadline: "",
-    tags: ""
+  onSubmit,
+  project,
+  columnId,
+  projectUsers,
+}) => {
+  const [formData, setFormData] = useState<TaskFormData>({
+    title: '',
+    description: '',
+    priority: 'MEDIUM',
+    dueDate: '',
+    assigneeIds: [],
+    tags: [],
+    estimatedHours: null,
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [newTag, setNewTag] = useState('');
 
-  if (!isOpen) return null;
+  // Сброс формы при открытии/закрытии модального окна
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        title: '',
+        description: '',
+        priority: 'MEDIUM',
+        dueDate: '',
+        assigneeIds: [],
+        tags: [],
+        estimatedHours: null,
+      });
+      setErrors({});
+      setNewTag('');
+    }
+  }, [isOpen]);
 
-  const handleSave = async () => {
-    if (!formData.title.trim() || !state.currentUser || !state.selectedProject || !state.selectedBoard)
+  // Валидация формы
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.title.trim()) {
+      newErrors.title = 'Название задачи обязательно';
+    }
+
+    if (formData.title.length > 200) {
+      newErrors.title = 'Название не должно превышать 200 символов';
+    }
+
+    if (formData.description.length > 1000) {
+      newErrors.description = 'Описание не должно превышать 1000 символов';
+    }
+
+    if (formData.estimatedHours !== null && formData.estimatedHours < 0) {
+      newErrors.estimatedHours = 'Время не может быть отрицательным';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  // Обработка отправки формы
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
       return;
+    }
 
+    setIsSubmitting(true);
     try {
-      const assignee = state.selectedProject.members.find(
-        (m) => m.id === formData.assigneeId
-      );
-      const tags = formData.tags.
-      split(",").
-      map((tag) => tag.trim()).
-      filter(Boolean);
-
-      // Find the first column that matches the initial status
-      const targetColumn = state.selectedBoard.columns.find(col => {
-        const colName = col.name.toLowerCase();
-        if (initialStatus === 'todo') {
-          return !colName.includes('работе') && !colName.includes('progress') && 
-                 !colName.includes('проверк') && !colName.includes('review') && 
-                 !colName.includes('выполнено') && !colName.includes('done');
-        } else if (initialStatus === 'in-progress') {
-          return colName.includes('работе') || colName.includes('progress') || colName.includes('процессе');
-        } else if (initialStatus === 'review') {
-          return colName.includes('проверк') || colName.includes('review') || colName.includes('тест');
-        } else if (initialStatus === 'done') {
-          return colName.includes('выполнено') || colName.includes('done') || colName.includes('завершено');
-        }
-        return false;
-      }) || state.selectedBoard.columns[0]; // Fallback to first column
-
-      const newTaskData = {
-        title: formData.title,
-        description: formData.description || undefined,
-        status: initialStatus,
+      const taskData: Partial<Task> = {
+        title: formData.title.trim(),
+        description: formData.description.trim() || undefined,
         priority: formData.priority,
-        assigneeId: assignee?.id,
-        columnId: targetColumn.id,
-        position: 0,
-        dueDate: formData.deadline ? (() => {
-          const date = new Date(formData.deadline);
-          return isNaN(date.getTime()) ? undefined : date;
-        })() : undefined,
-        tags
+        dueDate: formData.dueDate || undefined,
+        estimatedHours: formData.estimatedHours || undefined,
+        projectId: project.id,
+        columnId,
+        status: 'TODO',
+        assignees: formData.assigneeIds.map(userId => ({ userId, assignedAt: new Date().toISOString() })),
+        tags: formData.tags.length > 0 ? formData.tags : undefined,
       };
 
-      const success = await createTask(newTaskData);
-      
-      if (success) {
-        // Call onSave callback if provided
-        const newTask: Omit<Task, "id" | "createdAt" | "updatedAt"> = {
-          title: formData.title,
-          description: formData.description || undefined,
-          status: initialStatus as Task['status'],
-          priority: formData.priority,
-          assignee,
-          assignees: assignee ? [assignee] : [],
-          reporter: state.currentUser,
-          projectId: state.selectedProject.id,
-          boardId: state.selectedBoard.id,
-          subtasks: [],
-          deadline: formData.deadline ? (() => {
-            const date = new Date(formData.deadline);
-            return isNaN(date.getTime()) ? undefined : date;
-          })() : undefined,
-          attachments: [],
-          comments: [],
-          tags,
-          position: state.tasks.filter((t) => t.status === initialStatus && t.boardId === state.selectedBoard?.id).length
-        };
-        onSave(newTask);
-      }
-      
-      // Reset form
-      setFormData({
-        title: "",
-        description: "",
-        priority: "medium",
-        assigneeId: "",
-        deadline: "",
-        tags: ""
-      });
-      
+      await onSubmit(taskData);
       onClose();
     } catch (error) {
-      console.error('Failed to create task:', error);
+      console.error('Ошибка при создании задачи:', error);
+      setErrors({ submit: 'Не удалось создать задачу. Попробуйте еще раз.' });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const availableUsers = state.selectedProject?.members || [];
+  // Обработка изменения полей формы
+  const handleInputChange = (field: keyof TaskFormData, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  // Добавление тега
+  const handleAddTag = () => {
+    if (newTag.trim() && !formData.tags.includes(newTag.trim())) {
+      handleInputChange('tags', [...formData.tags, newTag.trim()]);
+      setNewTag('');
+    }
+  };
+
+  // Удаление тега
+  const handleRemoveTag = (tagToRemove: string) => {
+    handleInputChange('tags', formData.tags.filter(tag => tag !== tagToRemove));
+  };
+
+  // Переключение исполнителя
+  const toggleAssignee = (userId: number) => {
+    const newAssigneeIds = formData.assigneeIds.includes(userId)
+      ? formData.assigneeIds.filter(id => id !== userId)
+      : [...formData.assigneeIds, userId];
+    handleInputChange('assigneeIds', newAssigneeIds);
+  };
+
+  if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm modal-overlay animate-fade-in"
-      data-oid="4en7xi2">
-
-      <div
-        className="glass-dark w-full max-w-2xl overflow-hidden modal-content animate-scale-in"
-        data-oid="1i-ckcl">
-
-        {/* Header */}
-        <div
-          className="flex items-center justify-between p-6 border-b border-white/10"
-          data-oid="aoobp88">
-
-          <h2 className="text-xl font-semibold text-white" data-oid="ome44qz">
-            Создать задачу
-          </h2>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Заголовок */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Создать задачу</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-            data-oid="dbgonsd">
-
-            <X className="w-5 h-5 text-gray-400" data-oid="_-bq:bm" />
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={24} />
           </button>
         </div>
 
-        <div className="p-6 space-y-6" data-oid=":e4tpbe">
-          {/* Title */}
-          <div data-oid="13hqpzp">
-            <label
-              className="block text-sm font-medium text-gray-300 mb-2"
-              data-oid="_xhcukl">
-
+        {/* Форма */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Название задачи */}
+          <div>
+            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
               Название задачи *
             </label>
             <input
               type="text"
+              id="title"
               value={formData.title}
-              onChange={(e) =>
-              setFormData({ ...formData, title: e.target.value })
-              }
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500"
+              onChange={(e) => handleInputChange('title', e.target.value)}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                errors.title ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="Введите название задачи"
-              autoFocus
-              data-oid="0l3z8cr" />
-
+              maxLength={200}
+            />
+            {errors.title && (
+              <p className="mt-1 text-sm text-red-600">{errors.title}</p>
+            )}
           </div>
 
-          {/* Description */}
-          <div data-oid="sfwlkr6">
-            <label
-              className="block text-sm font-medium text-gray-300 mb-2"
-              data-oid="urhqeuh">
-
+          {/* Описание */}
+          <div>
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
               Описание
             </label>
             <textarea
+              id="description"
               value={formData.description}
-              onChange={(e) =>
-              setFormData({ ...formData, description: e.target.value })
-              }
-              rows={3}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 resize-none"
-              placeholder="Добавьте описание задачи"
-              data-oid="hq.w3b3" />
-
+              onChange={(e) => handleInputChange('description', e.target.value)}
+              rows={4}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                errors.description ? 'border-red-300' : 'border-gray-300'
+              }`}
+              placeholder="Введите описание задачи"
+              maxLength={1000}
+            />
+            {errors.description && (
+              <p className="mt-1 text-sm text-red-600">{errors.description}</p>
+            )}
           </div>
 
-          {/* Properties */}
-          <div
-            className="grid grid-cols-1 md:grid-cols-2 gap-6"
-            data-oid="vogp5.i">
-
-            {/* Assignee */}
-            <div data-oid="21lqz4m">
-              <label
-                className="block text-sm font-medium text-gray-300 mb-2"
-                data-oid="-lpf07_">
-
-                Исполнитель
-              </label>
-              <CustomSelect
-                options={[
-                  { value: "", label: "Не назначено" },
-                  ...availableUsers.map((user) => ({
-                    value: user.id,
-                    label: user.name
-                  }))
-                ]}
-                value={formData.assigneeId}
-                onChange={(value) => setFormData({ ...formData, assigneeId: value })}
-                placeholder="Не назначено"
-              />
-            </div>
-
-            {/* Priority */}
-            <div data-oid="-kxu37j">
-              <label
-                className="block text-sm font-medium text-gray-300 mb-2"
-                data-oid="mhmrz-7">
-
+          {/* Приоритет и дата выполнения */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Приоритет */}
+            <div>
+              <label htmlFor="priority" className="block text-sm font-medium text-gray-700 mb-2">
+                <Flag size={16} className="inline mr-1" />
                 Приоритет
               </label>
-              <CustomSelect
-                options={[
-                  { value: "low", label: "Низкий", color: "#a5b4fc" },
-  { value: "medium", label: "Средний", color: "#818cf8" },
-  { value: "high", label: "Высокий", color: "#6366f1" },
-  { value: "urgent", label: "Срочный", color: "#4f46e5" }
-                ]}
+              <select
+                id="priority"
                 value={formData.priority}
-                onChange={(value) => setFormData({ ...formData, priority: value as TaskPriority })}
-                placeholder="Выберите приоритет"
-              />
+                onChange={(e) => handleInputChange('priority', e.target.value as Task['priority'])}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {PRIORITY_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Deadline */}
-            <div data-oid="apjz-q4">
-              <label
-                className="block text-sm font-medium text-gray-300 mb-2"
-                data-oid="894btil">
-
-                Дедлайн
+            {/* Дата выполнения */}
+            <div>
+              <label htmlFor="dueDate" className="block text-sm font-medium text-gray-700 mb-2">
+                <Calendar size={16} className="inline mr-1" />
+                Дата выполнения
               </label>
               <input
                 type="date"
-                value={formData.deadline}
-                onChange={(e) =>
-                setFormData({ ...formData, deadline: e.target.value })
-                }
-                className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-primary-500"
-                data-oid="arvzg:l" />
-
-            </div>
-
-            {/* Tags */}
-            <div data-oid="pizy__v">
-              <label
-                className="block text-sm font-medium text-gray-300 mb-2"
-                data-oid="dublgfb">
-
-                Теги
-              </label>
-              <input
-                type="text"
-                value={formData.tags}
-                onChange={(e) =>
-                setFormData({ ...formData, tags: e.target.value })
-                }
-                className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500"
-                placeholder="Введите теги через запятую"
-                data-oid="pkx2rv2" />
-
+                id="dueDate"
+                value={formData.dueDate}
+                onChange={(e) => handleInputChange('dueDate', e.target.value)}
+                min={format(new Date(), 'yyyy-MM-dd')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
             </div>
           </div>
-        </div>
 
-        {/* Actions */}
-        <div
-          className="flex justify-end gap-3 p-6 border-t border-white/10"
-          data-oid="3c6o.e.">
+          {/* Оценка времени */}
+          <div>
+            <label htmlFor="estimatedHours" className="block text-sm font-medium text-gray-700 mb-2">
+              Оценка времени (часы)
+            </label>
+            <input
+              type="number"
+              id="estimatedHours"
+              value={formData.estimatedHours || ''}
+              onChange={(e) => handleInputChange('estimatedHours', e.target.value ? parseFloat(e.target.value) : null)}
+              min="0"
+              step="0.5"
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                errors.estimatedHours ? 'border-red-300' : 'border-gray-300'
+              }`}
+              placeholder="Введите количество часов"
+            />
+            {errors.estimatedHours && (
+              <p className="mt-1 text-sm text-red-600">{errors.estimatedHours}</p>
+            )}
+          </div>
 
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-            data-oid="j.3:8l8">
+          {/* Исполнители */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              <Users size={16} className="inline mr-1" />
+              Исполнители
+            </label>
+            <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-2">
+              {projectUsers.map(user => (
+                <label key={user.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                  <input
+                    type="checkbox"
+                    checked={formData.assigneeIds.includes(user.id)}
+                    onChange={() => toggleAssignee(user.id)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center text-xs font-medium text-gray-700">
+                      {user.firstName.charAt(0)}{user.lastName.charAt(0)}
+                    </div>
+                    <span className="text-sm text-gray-900">
+                      {user.firstName} {user.lastName}
+                    </span>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
 
-            Отмена
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!formData.title.trim()}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            data-oid="t5:9jzt">
+          {/* Теги */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Теги
+            </label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {formData.tags.map(tag => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTag(tag)}
+                    className="ml-1 text-blue-600 hover:text-blue-800"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTag())}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Добавить тег"
+              />
+              <button
+                type="button"
+                onClick={handleAddTag}
+                className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+          </div>
 
-            <Save className="w-4 h-4" data-oid="2yq8j9s" />
-            Создать задачу
-          </button>
-        </div>
+          {/* Ошибка отправки */}
+          {errors.submit && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{errors.submit}</p>
+            </div>
+          )}
+
+          {/* Кнопки действий */}
+          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              disabled={isSubmitting}
+            >
+              Отмена
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !formData.title.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSubmitting ? 'Создание...' : 'Создать задачу'}
+            </button>
+          </div>
+        </form>
       </div>
-    </div>);
+    </div>
+  );
+};
 
-}
+export default CreateTaskModal;

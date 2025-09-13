@@ -1,28 +1,115 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth';
-import { dbAdapter } from '@/lib/database-adapter';
-import { TaskPermissionService } from '@/services/implementations/task-permission.service';
+import { z } from 'zod';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 
-// Получение задачи по ID
+// Схема валидации для обновления задачи
+const updateTaskSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  description: z.string().max(1000).optional(),
+  status: z.enum(['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED']).optional(),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
+  dueDate: z.string().datetime().optional(),
+  estimatedHours: z.number().min(0).optional(),
+  columnId: z.number().optional(),
+  position: z.number().min(0).optional(),
+  assignees: z.array(z.object({
+    userId: z.number(),
+    assignedAt: z.string().datetime()
+  })).optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+// GET /api/tasks/[id] - Получение задачи
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return NextResponse.json(
-        { error: authResult.error },
+        { error: 'Необходима авторизация' },
         { status: 401 }
       );
     }
 
-    const { userId } = authResult.user;
-    const { id } = await params;
-    const taskId = id;
+    const taskId = parseInt(params.id);
+    if (isNaN(taskId)) {
+      return NextResponse.json(
+        { error: 'Некорректный ID задачи' },
+        { status: 400 }
+      );
+    }
 
-    const task = await dbAdapter.getTaskById(Number(taskId));
-    
+    // Получаем задачу с проверкой доступа
+    const task = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        project: {
+          OR: [
+            { ownerId: parseInt(session.user.id) },
+            {
+              members: {
+                some: {
+                  userId: parseInt(session.user.id)
+                }
+              }
+            }
+          ]
+        }
+      },
+      include: {
+        assignees: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true
+              }
+            }
+          }
+        },
+        comments: {
+          include: {
+            author: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        },
+        attachments: true,
+        subtasks: {
+          orderBy: {
+            position: 'asc'
+          }
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
+            ownerId: true
+          }
+        },
+        column: {
+          select: {
+            id: true,
+            name: true,
+            color: true
+          }
+        }
+      }
+    });
+
     if (!task) {
       return NextResponse.json(
         { error: 'Задача не найдена' },
@@ -30,58 +117,9 @@ export async function GET(
       );
     }
 
-    // Проверяем права доступа к задаче
-    const taskPermissionService = new TaskPermissionService(dbAdapter);
-    const canView = await taskPermissionService.canUserViewTask(Number(taskId), userId, authResult.user.role);
-    
-    if (!canView) {
-      return NextResponse.json(
-        { error: 'Нет доступа к задаче' },
-        { status: 403 }
-      );
-    }
-    
-    // Преобразование в формат API с правильной типизацией
-    // Преобразуем статус из формата БД в формат фронтенда
-    const frontendStatus = task.status === 'in_progress' ? 'in-progress' : task.status;
-    
-    const enrichedTask = {
-      id: Number(task.id),
-      title: task.title,
-      description: task.description || null,
-      status: frontendStatus || 'todo',
-      priority: task.priority || 'medium',
-      position: task.position || 0,
-      storyPoints: 0, // TODO: Добавить в интерфейс Task
-      estimatedHours: 0, // TODO: Добавить в интерфейс Task
-      actualHours: 0, // TODO: Добавить в интерфейс Task
-      deadline: task.deadline,
-      startedAt: null, // TODO: Добавить в интерфейс Task
-      completedAt: task.completedAt,
-      isArchived: false, // TODO: Добавить в интерфейс Task
-      archivedAt: null, // TODO: Добавить в интерфейс Task
-      projectId: task.projectId ? Number(task.projectId) : null,
-      projectName: 'Project Name', // TODO: Получить из проекта
-      projectColor: '#6366f1',
-      boardId: task.boardId ? Number(task.boardId) : null,
-      boardName: 'Board Name', // TODO: Получить из доски
-      columnId: task.columnId ? Number(task.columnId) : null,
-      columnTitle: 'Column Title', // TODO: Получить из колонки
-      columnColor: '#6366f1',
-      reporterId: task.reporterId ? Number(task.reporterId) : null,
-      reporterName: 'Reporter Name', // TODO: Получить из пользователя
-      parentTaskId: null, // TODO: Добавить в интерфейс Task
-      parentTaskTitle: null,
-      assignees: [], // TODO: Реализовать получение исполнителей
-      tags: [], // TODO: Реализовать получение тегов
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt
-    };
-
-    return NextResponse.json({ task: enrichedTask });
-
+    return NextResponse.json(task);
   } catch (error) {
-    console.error('Ошибка получения задачи:', error);
+    console.error('Ошибка при получении задачи:', error);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
       { status: 500 }
@@ -89,142 +127,212 @@ export async function GET(
   }
 }
 
-// Обновление задачи
-export async function PUT(
+// PATCH /api/tasks/[id] - Обновление задачи
+export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return NextResponse.json(
-        { error: authResult.error },
+        { error: 'Необходима авторизация' },
         { status: 401 }
       );
     }
 
-    const { userId } = authResult.user;
-    const { id } = await params;
-    const taskId = id;
-    const updateData = await request.json();
-    
-    // Проверка существования задачи
-    const existingTask = await dbAdapter.getTaskById(Number(taskId));
+    const taskId = parseInt(params.id);
+    if (isNaN(taskId)) {
+      return NextResponse.json(
+        { error: 'Некорректный ID задачи' },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    const validatedData = updateTaskSchema.parse(body);
+
+    // Проверяем существование задачи и права доступа
+    const existingTask = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        project: {
+          OR: [
+            { ownerId: parseInt(session.user.id) },
+            {
+              members: {
+                some: {
+                  userId: parseInt(session.user.id),
+                  role: { in: ['ADMIN', 'MEMBER'] }
+                }
+              }
+            }
+          ]
+        }
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            ownerId: true
+          }
+        }
+      }
+    });
+
     if (!existingTask) {
       return NextResponse.json(
-        { error: 'Задача не найдена' },
+        { error: 'Задача не найдена или нет прав доступа' },
         { status: 404 }
       );
     }
-    
-    // Проверяем права доступа к задаче
-    const taskPermissionService = new TaskPermissionService(dbAdapter);
-    const canEdit = await taskPermissionService.canUserEditTask(Number(taskId), userId, authResult.user.role);
-    
-    if (!canEdit) {
-      return NextResponse.json(
-        { error: 'Нет прав на редактирование задачи' },
-        { status: 403 }
-      );
-    }
 
-    // Подготовка данных для обновления
-    const updateTaskData: Partial<typeof existingTask> = {
-      ...existingTask,
-      updatedAt: new Date()
-    };
+    // Проверяем права на изменение
+    const canManage = existingTask.project.ownerId === parseInt(session.user.id);
+    if (!canManage) {
+      // Проверяем роль участника
+      const memberRole = await prisma.projectMember.findFirst({
+        where: {
+          projectId: existingTask.project.id,
+          userId: parseInt(session.user.id)
+        },
+        select: { role: true }
+      });
 
-    // Обновление разрешенных полей
-    const allowedFields = ['title', 'description', 'status', 'priority', 'position', 'columnId', 'deadline'];
-    
-    for (const field of allowedFields) {
-      if (updateData.hasOwnProperty(field)) {
-        if (field === 'deadline' && updateData[field]) {
-          updateTaskData[field] = new Date(updateData[field]);
-        } else if (field === 'status') {
-          // Преобразуем статус из формата фронтенда в формат БД
-          updateTaskData[field] = updateData[field] === 'in-progress' ? 'in_progress' : updateData[field];
-        } else {
-          updateTaskData[field] = updateData[field];
-        }
+      if (!memberRole || memberRole.role === 'VIEWER') {
+        return NextResponse.json(
+          { error: 'Недостаточно прав для изменения задачи' },
+          { status: 403 }
+        );
       }
     }
 
-    // Обновление времени завершения при изменении статуса
-    if (updateData.status === 'done' && existingTask.status !== 'done') {
-      updateTaskData.completedAt = new Date();
-    } else if (updateData.status !== 'done' && existingTask.status === 'done') {
-      updateTaskData.completedAt = undefined;
+    // Если изменяется колонка, проверяем её существование
+    if (validatedData.columnId && validatedData.columnId !== existingTask.columnId) {
+      const targetColumn = await prisma.column.findFirst({
+        where: {
+          id: validatedData.columnId,
+          board: {
+            projectId: existingTask.project.id
+          }
+        }
+      });
+
+      if (!targetColumn) {
+        return NextResponse.json(
+          { error: 'Целевая колонка не найдена' },
+          { status: 400 }
+        );
+      }
     }
 
-    // Обновление задачи
-    const updatedTask = await dbAdapter.updateTask(Number(taskId), {
-      title: updateTaskData.title,
-      description: updateTaskData.description || null,
-      status: updateTaskData.status || 'todo',
-      priority: updateTaskData.priority || 'medium',
-      position: updateTaskData.position || 0,
-      columnId: updateTaskData.columnId ? Number(updateTaskData.columnId) : undefined,
-      deadline: updateTaskData.deadline,
-      completedAt: updateTaskData.completedAt
+    // Выполняем обновление в транзакции
+    const updatedTask = await prisma.$transaction(async (tx) => {
+      // Обновляем основные поля задачи
+      const taskUpdate: any = {
+        ...validatedData,
+        updatedAt: new Date()
+      };
+
+      // Убираем assignees из основного обновления
+      delete taskUpdate.assignees;
+
+      const task = await tx.task.update({
+        where: { id: taskId },
+        data: taskUpdate,
+        include: {
+          assignees: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true
+                }
+              }
+            }
+          },
+          project: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          column: {
+            select: {
+              id: true,
+              name: true,
+              color: true
+            }
+          }
+        }
+      });
+
+      // Обновляем исполнителей, если они переданы
+      if (validatedData.assignees !== undefined) {
+        // Удаляем существующих исполнителей
+        await tx.taskAssignee.deleteMany({
+          where: { taskId }
+        });
+
+        // Добавляем новых исполнителей
+        if (validatedData.assignees.length > 0) {
+          await tx.taskAssignee.createMany({
+            data: validatedData.assignees.map(assignee => ({
+              taskId,
+              userId: assignee.userId,
+              assignedAt: new Date(assignee.assignedAt)
+            }))
+          });
+        }
+
+        // Получаем обновленную задачу с новыми исполнителями
+        return await tx.task.findUnique({
+          where: { id: taskId },
+          include: {
+            assignees: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true
+                  }
+                }
+              }
+            },
+            project: {
+              select: {
+                id: true,
+                name: true
+              }
+            },
+            column: {
+              select: {
+                id: true,
+                name: true,
+                color: true
+              }
+            }
+          }
+        });
+      }
+
+      return task;
     });
-    
-    if (!updatedTask) {
+
+    return NextResponse.json(updatedTask);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Ошибка обновления задачи' },
-        { status: 500 }
+        { error: 'Некорректные данные', details: error.errors },
+        { status: 400 }
       );
     }
-    
-    // TODO: Обновление исполнителей и тегов
-    // if (updateData.assigneeIds !== undefined) {
-    //   await db.updateTaskAssignees(taskId, updateData.assigneeIds);
-    // }
-    // if (updateData.tags !== undefined) {
-    //   await db.updateTaskTags(taskId, updateData.tags);
-    // }
-    
-    // Преобразование в формат API с правильной типизацией
-    // Преобразуем статус из формата БД в формат фронтенда
-    const frontendStatusUpdated = updatedTask.status === 'in_progress' ? 'in-progress' : updatedTask.status;
-    
-    const enrichedTask = {
-      id: Number(updatedTask.id),
-      title: updatedTask.title,
-      description: updatedTask.description || null,
-      status: frontendStatusUpdated || 'todo',
-      priority: updatedTask.priority || 'medium',
-      position: updatedTask.position || 0,
-      storyPoints: 0, // TODO: Добавить в интерфейс Task
-      estimatedHours: 0, // TODO: Добавить в интерфейс Task
-      actualHours: 0, // TODO: Добавить в интерфейс Task
-      deadline: updatedTask.deadline,
-      startedAt: null, // TODO: Добавить в интерфейс Task
-      completedAt: updatedTask.completedAt,
-      isArchived: false, // TODO: Добавить в интерфейс Task
-      archivedAt: null, // TODO: Добавить в интерфейс Task
-      projectId: updatedTask.projectId ? Number(updatedTask.projectId) : null,
-      projectName: 'Project Name', // TODO: Получить из проекта
-      projectColor: '#6366f1',
-      boardId: updatedTask.boardId ? Number(updatedTask.boardId) : null,
-      boardName: 'Board Name', // TODO: Получить из доски
-      columnId: updatedTask.columnId ? Number(updatedTask.columnId) : null,
-      columnTitle: 'Column Title', // TODO: Получить из колонки
-      columnColor: '#6366f1',
-      reporterId: updatedTask.reporterId ? Number(updatedTask.reporterId) : null,
-      reporterName: 'Reporter Name', // TODO: Получить из пользователя
-      parentTaskId: null, // TODO: Добавить в интерфейс Task
-      parentTaskTitle: null,
-      assignees: [], // TODO: Реализовать получение исполнителей
-      tags: [], // TODO: Реализовать получение тегов
-      createdAt: updatedTask.createdAt,
-      updatedAt: updatedTask.updatedAt
-    };
 
-    return NextResponse.json({ task: enrichedTask });
-
-  } catch (error) {
-    console.error('Ошибка обновления задачи:', error);
+    console.error('Ошибка при обновлении задачи:', error);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
       { status: 500 }
@@ -232,61 +340,98 @@ export async function PUT(
   }
 }
 
-// Удаление задачи
+// DELETE /api/tasks/[id] - Удаление задачи
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
       return NextResponse.json(
-        { error: authResult.error },
+        { error: 'Необходима авторизация' },
         { status: 401 }
       );
     }
 
-    const { userId } = authResult.user;
-    const { id } = await params;
-    const taskId = id;
+    const taskId = parseInt(params.id);
+    if (isNaN(taskId)) {
+      return NextResponse.json(
+        { error: 'Некорректный ID задачи' },
+        { status: 400 }
+      );
+    }
 
-    // Проверка существования задачи
-    const existingTask = await dbAdapter.getTaskById(Number(taskId));
+    // Проверяем существование задачи и права доступа
+    const existingTask = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        project: {
+          OR: [
+            { ownerId: parseInt(session.user.id) },
+            {
+              members: {
+                some: {
+                  userId: parseInt(session.user.id),
+                  role: { in: ['ADMIN', 'MEMBER'] }
+                }
+              }
+            }
+          ]
+        }
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            ownerId: true
+          }
+        }
+      }
+    });
+
     if (!existingTask) {
       return NextResponse.json(
-        { error: 'Задача не найдена' },
+        { error: 'Задача не найдена или нет прав доступа' },
         { status: 404 }
       );
     }
-    
-    // Проверяем права доступа к задаче
-    const taskPermissionService = new TaskPermissionService(dbAdapter);
-    const canDelete = await taskPermissionService.canUserDeleteTask(Number(taskId), userId, authResult.user.role);
-    
-    if (!canDelete) {
-      return NextResponse.json(
-        { error: 'Нет прав на удаление задачи. Вы можете удалять только созданные вами задачи.' },
-        { status: 403 }
-      );
+
+    // Проверяем права на удаление
+    const canManage = existingTask.project.ownerId === parseInt(session.user.id);
+    if (!canManage) {
+      // Проверяем роль участника
+      const memberRole = await prisma.projectMember.findFirst({
+        where: {
+          projectId: existingTask.project.id,
+          userId: parseInt(session.user.id)
+        },
+        select: { role: true }
+      });
+
+      if (!memberRole || memberRole.role !== 'ADMIN') {
+        return NextResponse.json(
+          { error: 'Недостаточно прав для удаления задачи' },
+          { status: 403 }
+        );
+      }
     }
 
-    // Удаление задачи
-    const success = await dbAdapter.deleteTask(Number(taskId));
-    
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Ошибка удаления задачи' },
-        { status: 500 }
-      );
-    }
+    // Удаляем задачу в транзакции
+    await prisma.$transaction(async (tx) => {
+      // Удаляем связанные данные
+      await tx.taskAssignee.deleteMany({ where: { taskId } });
+      await tx.taskComment.deleteMany({ where: { taskId } });
+      await tx.taskAttachment.deleteMany({ where: { taskId } });
+      await tx.subtask.deleteMany({ where: { taskId } });
+      
+      // Удаляем саму задачу
+      await tx.task.delete({ where: { id: taskId } });
+    });
 
-    return NextResponse.json(
-      { message: 'Задача успешно удалена' },
-      { status: 200 }
-    );
-
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Ошибка удаления задачи:', error);
+    console.error('Ошибка при удалении задачи:', error);
     return NextResponse.json(
       { error: 'Внутренняя ошибка сервера' },
       { status: 500 }

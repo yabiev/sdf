@@ -277,3 +277,5 @@ export function TaskActionsModal({ isOpen, onClose, taskId }: TaskActionsModalPr
     </div>
   );
 }
+
+export default TaskActionsModal;

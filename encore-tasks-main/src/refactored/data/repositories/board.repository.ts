@@ -6,7 +6,10 @@ import {
   Board,
   SearchFilters,
   SortOptions,
-  PaginationOptions
+  PaginationOptions,
+  BoardStatistics,
+  TaskStatus,
+  TaskPriority
 } from '../types';
 import { databaseAdapter } from '../adapters/database-adapter';
 import { generateId } from '../../../lib/utils';
@@ -48,7 +51,10 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async findByProjectId(projectId: string, filters?: SearchFilters): Promise<Board[]> {
+  async findByProjectId(
+    projectId: string,
+    includeArchived?: boolean
+  ): Promise<Board[]> {
     try {
       let sql = `
         SELECT b.*, 
@@ -71,18 +77,11 @@ export class BoardRepository implements IBoardRepository {
         WHERE b.project_id = ?
       `;
       
-      const params: any[] = [projectId];
+      const params: unknown[] = [projectId];
 
-      // Apply filters
-      if (filters?.isArchived !== undefined) {
-        sql += ' AND b.is_archived = ?';
-        params.push(filters.isArchived ? 1 : 0);
-      }
-
-      if (filters?.query) {
-        sql += ' AND (b.name LIKE ? OR b.description LIKE ?)';
-        const searchTerm = `%${filters.query}%`;
-        params.push(searchTerm, searchTerm);
+      // Apply archive filter
+      if (includeArchived === false) {
+        sql += ' AND b.is_archived = 0';
       }
 
       sql += ' GROUP BY b.id ORDER BY b.position ASC, b.created_at DESC';
@@ -90,7 +89,7 @@ export class BoardRepository implements IBoardRepository {
       const rows = await databaseAdapter.query(sql, params);
       return rows.map(row => this.transformToBoard(row));
     } catch (error) {
-      throw new Error(`Failed to find boards by project id: ${error}`);
+      throw new Error(`Failed to find boards by project ID: ${error}`);
     }
   }
 
@@ -121,7 +120,7 @@ export class BoardRepository implements IBoardRepository {
         WHERE 1=1
       `;
       
-      const params: any[] = [];
+      const params: unknown[] = [];
 
       // Apply filters
       if (filters?.isArchived !== undefined) {
@@ -203,13 +202,14 @@ export class BoardRepository implements IBoardRepository {
           const columnData = {
             id: generateId(),
             board_id: id,
-            title: column.title,
+            title: column.name,
             position: column.position,
             color: column.color || '#6B7280',
             is_collapsed: column.isCollapsed ? 1 : 0,
             task_limit: column.taskLimit || null,
             wip_limit: column.wipLimit || null,
             settings: JSON.stringify(column.settings || {}),
+            created_by: board.createdBy || null,
             is_archived: 0,
             created_at: now.toISOString(),
             updated_at: now.toISOString()
@@ -219,22 +219,23 @@ export class BoardRepository implements IBoardRepository {
       } else {
         // Create default columns for new board
         const defaultColumns = [
-          { title: 'To Do', position: 0, color: '#EF4444' },
-          { title: 'In Progress', position: 1, color: '#F59E0B' },
-          { title: 'Done', position: 2, color: '#10B981' }
+          { name: 'To Do', position: 0, color: '#EF4444' },
+          { name: 'In Progress', position: 1, color: '#F59E0B' },
+          { name: 'Done', position: 2, color: '#10B981' }
         ];
 
         for (const column of defaultColumns) {
           const columnData = {
             id: generateId(),
             board_id: id,
-            title: column.title,
+            title: column.name,
             position: column.position,
             color: column.color,
             is_collapsed: 0,
             task_limit: null,
             wip_limit: null,
             settings: JSON.stringify({}),
+            created_by: board.createdBy || null,
             is_archived: 0,
             created_at: now.toISOString(),
             updated_at: now.toISOString()
@@ -253,7 +254,7 @@ export class BoardRepository implements IBoardRepository {
 
   async update(id: string, updates: Partial<Board>): Promise<Board> {
     try {
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, unknown> = {};
 
       if (updates.name !== undefined) updateData.name = updates.name;
       if (updates.description !== undefined) updateData.description = updates.description;
@@ -324,6 +325,24 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
+  async reorderBoards(projectId: string, boardIds: string[]): Promise<void> {
+    try {
+      await databaseAdapter.beginTransaction();
+      
+      for (let i = 0; i < boardIds.length; i++) {
+        await databaseAdapter.update(this.tableName, boardIds[i], {
+          position: i,
+          updated_at: new Date().toISOString()
+        });
+      }
+      
+      await databaseAdapter.commitTransaction();
+    } catch (error) {
+      await databaseAdapter.rollbackTransaction();
+      throw new Error(`Failed to reorder boards: ${error}`);
+    }
+  }
+
   async duplicate(id: string, newName: string): Promise<Board> {
     try {
       await databaseAdapter.beginTransaction();
@@ -357,7 +376,7 @@ export class BoardRepository implements IBoardRepository {
         const columnData = {
           id: generateId(),
           board_id: newBoardId,
-          title: column.title,
+          title: column.name,
           position: column.position,
           color: column.color,
           is_collapsed: column.isCollapsed ? 1 : 0,
@@ -379,76 +398,256 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async getStatistics(id: string): Promise<{
-    totalTasks: number;
-    completedTasks: number;
-    overdueTasks: number;
-    tasksPerColumn: Record<string, number>;
-  }> {
+  async getStatistics(id: string): Promise<BoardStatistics> {
     try {
-      const sql = `
-        SELECT 
-          (SELECT COUNT(*) FROM tasks WHERE board_id = ? AND is_archived = 0) as total_tasks,
-          (SELECT COUNT(*) FROM tasks WHERE board_id = ? AND status = 'done' AND is_archived = 0) as completed_tasks,
-          (SELECT COUNT(*) FROM tasks WHERE board_id = ? AND due_date < datetime('now') AND status != 'done' AND is_archived = 0) as overdue_tasks
+      // Get basic task counts
+      const totalTasksSql = `SELECT COUNT(*) as count FROM tasks WHERE board_id = ? AND is_archived = 0`;
+      const [totalResult] = await databaseAdapter.query(totalTasksSql, [id]) as any[];
+      const totalTasks = totalResult?.count || 0;
+      
+      // Get tasks by status
+      const statusSql = `
+        SELECT status, COUNT(*) as count 
+        FROM tasks 
+        WHERE board_id = ? AND is_archived = 0 
+        GROUP BY status
       `;
-      
-      const result = await databaseAdapter.queryOne(sql, [id, id, id]);
-      
-      // Get tasks per column
-      const columnSql = `
-        SELECT c.id, c.title, COUNT(t.id) as task_count
-        FROM columns c
-        LEFT JOIN tasks t ON c.id = t.column_id AND t.is_archived = 0
-        WHERE c.board_id = ? AND c.is_archived = 0
-        GROUP BY c.id, c.title
-      `;
-      
-      const columnResults = await databaseAdapter.query(columnSql, [id]);
-      const tasksPerColumn: Record<string, number> = {};
-      
-      columnResults.forEach(row => {
-        tasksPerColumn[row.title] = row.task_count || 0;
+      const statusResults = await databaseAdapter.query(statusSql, [id]);
+      const tasksByStatus: Record<TaskStatus, number> = {
+        todo: 0,
+        in_progress: 0,
+        review: 0,
+        done: 0,
+        blocked: 0
+      };
+      statusResults.forEach((row: any) => {
+        if (row.status in tasksByStatus) {
+          tasksByStatus[row.status as TaskStatus] = row.count;
+        }
       });
       
+      // Get tasks by priority
+      const prioritySql = `
+        SELECT priority, COUNT(*) as count 
+        FROM tasks 
+        WHERE board_id = ? AND is_archived = 0 
+        GROUP BY priority
+      `;
+      const priorityResults = await databaseAdapter.query(prioritySql, [id]);
+      const tasksByPriority: Record<TaskPriority, number> = {
+        low: 0,
+        medium: 0,
+        high: 0,
+        urgent: 0
+      };
+      priorityResults.forEach((row: any) => {
+        if (row.priority in tasksByPriority) {
+          tasksByPriority[row.priority as TaskPriority] = row.count;
+        }
+      });
+      
+      // Calculate average completion time (in days)
+      const completionSql = `
+        SELECT AVG(julianday(updated_at) - julianday(created_at)) as avg_days
+        FROM tasks 
+        WHERE board_id = ? AND status = 'done' AND is_archived = 0
+      `;
+      const [completionResult] = await databaseAdapter.query(completionSql, [id]) as any[];
+      const averageCompletionTime = completionResult?.avg_days || 0;
+      
+      // Get completed tasks count
+      const completedTasks = tasksByStatus.done || 0;
+      
+      // Get total columns count
+      const columnsSql = `SELECT COUNT(*) as count FROM columns WHERE board_id = ? AND is_archived = 0`;
+      const [columnsResult] = await databaseAdapter.query(columnsSql, [id]) as any[];
+      const totalColumns = columnsResult?.count || 0;
+      
+      // Get overdue tasks count
+      const overdueSql = `
+        SELECT COUNT(*) as count 
+        FROM tasks 
+        WHERE board_id = ? AND is_archived = 0 AND due_date < datetime('now') AND status != 'done'
+      `;
+      const [overdueResult] = await databaseAdapter.query(overdueSql, [id]) as any[];
+      const overdueTasks = overdueResult?.count || 0;
+      
       return {
-        totalTasks: result?.total_tasks || 0,
-        completedTasks: result?.completed_tasks || 0,
-        overdueTasks: result?.overdue_tasks || 0,
-        tasksPerColumn
+        totalTasks,
+        completedTasks,
+        totalColumns,
+        overdueTasks,
+        tasksByStatus,
+        tasksByPriority,
+        averageCompletionTime
       };
     } catch (error) {
       throw new Error(`Failed to get board statistics: ${error}`);
     }
   }
 
-  private transformToBoard(row: any): Board {
-    const columns = row.columns ? JSON.parse(row.columns) : [];
+  async search(
+    query: string,
+    projectId?: string,
+    filters?: SearchFilters
+  ): Promise<Board[]> {
+    try {
+      let sql = `
+        SELECT b.*, 
+               json_group_array(
+                 json_object(
+                   'id', c.id,
+                   'title', c.title,
+                   'position', c.position,
+                   'color', c.color,
+                   'isCollapsed', c.is_collapsed,
+                   'taskLimit', c.task_limit,
+                   'wipLimit', c.wip_limit,
+                   'settings', c.settings,
+                   'createdAt', c.created_at,
+                   'updatedAt', c.updated_at
+                 )
+               ) as columns
+        FROM boards b
+        LEFT JOIN columns c ON b.id = c.board_id AND c.is_archived = 0
+        WHERE (b.name LIKE ? OR b.description LIKE ?)
+      `;
+      
+      const searchTerm = `%${query}%`;
+      const params: unknown[] = [searchTerm, searchTerm];
+
+      // Apply project filter
+      if (projectId) {
+        sql += ' AND b.project_id = ?';
+        params.push(projectId);
+      }
+
+      // Apply filters
+      if (filters?.isArchived !== undefined) {
+        sql += ' AND b.is_archived = ?';
+        params.push(filters.isArchived ? 1 : 0);
+      }
+
+      sql += ' GROUP BY b.id ORDER BY b.position ASC, b.created_at DESC';
+
+      const rows = await databaseAdapter.query(sql, params);
+      return rows.map(row => this.transformToBoard(row));
+    } catch (error) {
+      throw new Error(`Failed to search boards: ${error}`);
+    }
+  }
+
+  async getRecentlyViewed(userId: string, limit: number = 10): Promise<Board[]> {
+    try {
+      const sql = `
+        SELECT b.*, 
+               json_group_array(
+                 json_object(
+                   'id', c.id,
+                   'title', c.title,
+                   'position', c.position,
+                   'color', c.color,
+                   'isCollapsed', c.is_collapsed,
+                   'taskLimit', c.task_limit,
+                   'wipLimit', c.wip_limit,
+                   'settings', c.settings,
+                   'createdAt', c.created_at,
+                   'updatedAt', c.updated_at
+                 )
+               ) as columns,
+               bv.viewed_at
+        FROM boards b
+        LEFT JOIN columns c ON b.id = c.board_id AND c.is_archived = 0
+        INNER JOIN board_views bv ON b.id = bv.board_id
+        WHERE bv.user_id = ? AND b.is_archived = 0
+        GROUP BY b.id
+        ORDER BY bv.viewed_at DESC
+        LIMIT ?
+      `;
+      
+      const rows = await databaseAdapter.query(sql, [userId, limit]);
+      return rows.map(row => this.transformToBoard(row));
+    } catch (error) {
+      throw new Error(`Failed to get recently viewed boards: ${error}`);
+    }
+  }
+
+  async markAsViewed(boardId: string, userId: string): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+      
+      // Check if view record exists
+      const existingSql = 'SELECT id FROM board_views WHERE board_id = ? AND user_id = ?';
+      const existing = await databaseAdapter.queryOne(existingSql, [boardId, userId]);
+      
+      if (existing) {
+        // Update existing view record
+        await databaseAdapter.query(
+          'UPDATE board_views SET viewed_at = ? WHERE board_id = ? AND user_id = ?',
+          [now, boardId, userId]
+        );
+      } else {
+        // Create new view record
+        await databaseAdapter.insert('board_views', {
+          id: generateId(),
+          board_id: boardId,
+          user_id: userId,
+          viewed_at: now,
+          created_at: now
+        });
+      }
+    } catch (error) {
+      throw new Error(`Failed to mark board as viewed: ${error}`);
+    }
+  }
+
+  private transformToBoard(row: Record<string, unknown>): Board {
+    const columns = row.columns ? JSON.parse(row.columns as string) : [];
     
     return {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      projectId: row.project_id,
-      type: row.type || 'kanban',
-      position: row.position || 0,
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string,
+      projectId: row.project_id as string,
+      type: (row.type as string) || 'kanban',
+      position: (row.position as number) || 0,
       isArchived: Boolean(row.is_archived),
-      settings: JSON.parse(row.settings || '{}'),
-      viewSettings: JSON.parse(row.view_settings || '{}'),
-      columns: columns.filter((c: any) => c.id).map((c: any) => ({
-        id: c.id,
-        title: c.title,
-        position: c.position,
-        color: c.color,
+      settings: JSON.parse((row.settings as string) || '{}'),
+      viewSettings: JSON.parse((row.view_settings as string) || '{}'),
+      columns: columns.filter((c: Record<string, unknown>) => c.id).map((c: Record<string, unknown>) => ({
+        id: c.id as string,
+        title: c.title as string,
+        position: c.position as number,
+        color: c.color as string,
         isCollapsed: Boolean(c.isCollapsed),
-        taskLimit: c.taskLimit,
-        wipLimit: c.wipLimit,
-        settings: JSON.parse(c.settings || '{}'),
-        createdAt: new Date(c.createdAt),
-        updatedAt: new Date(c.updatedAt)
+        taskLimit: c.taskLimit as number,
+        wipLimit: c.wipLimit as number,
+        settings: JSON.parse((c.settings as string) || '{}'),
+        createdAt: new Date(c.createdAt as string),
+        updatedAt: new Date(c.updatedAt as string)
       })),
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at)
+      statistics: {
+        totalTasks: 0,
+        completedTasks: 0,
+        totalColumns: 0,
+        overdueTasks: 0,
+        tasksByStatus: {
+          todo: 0,
+          in_progress: 0,
+          review: 0,
+          done: 0,
+          blocked: 0
+        },
+        tasksByPriority: {
+          low: 0,
+          medium: 0,
+          high: 0,
+          urgent: 0
+        },
+        averageCompletionTime: 0
+      },
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string)
     };
   }
 }

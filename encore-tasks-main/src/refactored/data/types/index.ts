@@ -13,27 +13,13 @@ export interface User extends BaseEntity {
   email: string;
   name: string;
   avatar?: string;
-  isActive: boolean;
+  isApproved?: boolean;
   lastLoginAt?: Date;
-  preferences: UserPreferences;
+  role: 'admin' | 'manager' | 'user';
+  password_hash?: string;
 }
 
-export interface UserPreferences {
-  theme: 'light' | 'dark';
-  language: string;
-  timezone: string;
-  notifications: NotificationSettings;
-}
 
-export interface NotificationSettings {
-  email: boolean;
-  push: boolean;
-  telegram: boolean;
-  taskAssigned: boolean;
-  taskCompleted: boolean;
-  taskOverdue: boolean;
-  projectUpdates: boolean;
-}
 
 // Project Types
 export interface Project extends BaseEntity {
@@ -86,9 +72,13 @@ export interface Board extends BaseEntity {
   name: string;
   description?: string;
   projectId: string;
+  type?: string;
   position: number;
+  color?: string;
   isArchived: boolean;
+  createdBy?: string;
   settings: BoardSettings;
+  viewSettings?: Record<string, unknown>;
   columns: Column[];
   statistics: BoardStatistics;
 }
@@ -106,7 +96,10 @@ export interface Column extends BaseEntity {
   position: number;
   color?: string;
   wipLimit?: number;
+  taskLimit?: number;
   isCollapsed: boolean;
+  isArchived?: boolean;
+  createdBy?: string;
   settings: ColumnSettings;
 }
 
@@ -119,6 +112,9 @@ export interface ColumnSettings {
 
 export interface BoardStatistics {
   totalTasks: number;
+  completedTasks: number;
+  totalColumns: number;
+  overdueTasks: number;
   tasksByStatus: Record<TaskStatus, number>;
   tasksByPriority: Record<TaskPriority, number>;
   averageCompletionTime: number;
@@ -135,10 +131,14 @@ export interface Task extends BaseEntity {
   projectId: string;
   position: number;
   assigneeId?: string;
+  assignees?: User[]; // Array of assigned users
   reporterId: string;
+  reporter?: User; // Reporter user data
+  createdBy?: string;
   dueDate?: Date;
   estimatedHours?: number;
   actualHours?: number;
+  progress?: number; // Progress percentage 0-100
   tags: string[];
   isArchived: boolean;
   metadata: TaskMetadata;
@@ -147,6 +147,17 @@ export interface Task extends BaseEntity {
   comments: Comment[];
   timeEntries: TimeEntry[];
   history: TaskAction[];
+  // Related entities for display
+  project?: Project;
+  board?: Board;
+  column?: Column;
+  // Statistics for display
+  statistics?: {
+    totalComments: number;
+    totalAttachments: number;
+    totalSubtasks: number;
+    completedSubtasks: number;
+  };
 }
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'blocked';
@@ -175,6 +186,7 @@ export type DependencyType = 'blocks' | 'blocked_by' | 'relates_to' | 'duplicate
 export interface Attachment extends BaseEntity {
   taskId: string;
   fileName: string;
+  originalName: string;
   fileSize: number;
   mimeType: string;
   url: string;
@@ -204,8 +216,8 @@ export interface TaskAction extends BaseEntity {
   taskId: string;
   userId: string;
   action: TaskActionType;
-  oldValue?: any;
-  newValue?: any;
+  oldValue?: unknown;
+  newValue?: unknown;
   description: string;
 }
 
@@ -255,18 +267,11 @@ export interface GlobalPermissions {
   canExportData: boolean;
 }
 
-// API Response Types
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: ApiError;
-  meta?: ResponseMeta;
-}
-
+// API Error Types
 export interface ApiError {
   code: string;
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   field?: string;
 }
 
@@ -285,7 +290,7 @@ export interface SystemEvent {
   entityId: string;
   userId: string;
   timestamp: Date;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
 }
 
 export type EventType = 
@@ -319,6 +324,7 @@ export interface SearchFilters {
   query?: string;
   projectIds?: string[];
   boardIds?: string[];
+  columnIds?: string[];
   assigneeIds?: string[];
   statuses?: TaskStatus[];
   priorities?: TaskPriority[];
@@ -328,6 +334,9 @@ export interface SearchFilters {
   createdFrom?: Date;
   createdTo?: Date;
   isArchived?: boolean;
+  showArchived?: boolean;
+  isOverdue?: boolean;
+  hasDueDate?: boolean;
 }
 
 export interface SortOptions {
@@ -353,7 +362,7 @@ export interface ValidationError {
 }
 
 // Cache Types
-export interface CacheEntry<T = any> {
+export interface CacheEntry<T = unknown> {
   key: string;
   data: T;
   expiresAt: Date;
@@ -362,12 +371,20 @@ export interface CacheEntry<T = any> {
 
 // Configuration Types
 export interface AppConfig {
-  database: DatabaseConfig;
-  auth: AuthConfig;
-  cache: CacheConfig;
-  notifications: NotificationConfig;
-  features: FeatureFlags;
+  theme: 'light' | 'dark' | 'system';
+  language: string;
+  notifications: {
+    email: boolean;
+    push: boolean;
+    inApp: boolean;
+  };
+  privacy: {
+    analytics: boolean;
+    cookies: boolean;
+  };
 }
+
+// Data Transfer Objects for API operations
 
 export interface DatabaseConfig {
   type: 'postgresql';
@@ -431,5 +448,163 @@ export interface FeatureFlags {
   enableDataExport: boolean;
 }
 
+// Create and Update Data Types
+export interface CreateProjectData {
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+}
+
+export interface UpdateProjectData {
+  name?: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  status?: ProjectStatus;
+  isArchived?: boolean;
+}
+
+export interface CreateBoardData {
+  name: string;
+  description?: string;
+  projectId: string;
+  color?: string;
+  icon?: string;
+}
+
+export interface UpdateBoardData {
+  name?: string;
+  description?: string;
+  projectId?: string;
+  color?: string;
+  icon?: string;
+  status?: BoardStatus;
+  isArchived?: boolean;
+}
+
+export interface DuplicateBoardData {
+  name: string;
+  projectId: string;
+  includeTasks?: boolean;
+}
+
+export interface CreateTaskData {
+  title: string;
+  description?: string;
+  columnId: string;
+  projectId?: string;
+  boardId?: string;
+  assigneeId?: string;
+  assigneeIds?: string[]; // Support for multiple assignees
+  priority?: TaskPriority;
+  dueDate?: Date;
+  tags?: string[];
+  estimatedHours?: number;
+}
+
+export interface UpdateTaskData {
+  title?: string;
+  description?: string;
+  columnId?: string;
+  projectId?: string;
+  boardId?: string;
+  assigneeId?: string;
+  assigneeIds?: string[]; // Support for multiple assignees
+  priority?: TaskPriority;
+  status?: TaskStatus;
+  dueDate?: Date;
+  tags?: string[];
+  estimatedHours?: number;
+  actualHours?: number;
+  position?: number;
+  progress?: number;
+}
+
+// Legacy type aliases for backward compatibility
+export type UserId = string;
+export type CreateTaskDto = CreateTaskData;
+export type UpdateTaskDto = UpdateTaskData;
+export type TaskFilters = SearchFilters;
+
+// Service Response Types
+export interface ServiceResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+// Additional missing types
+export type ProjectStatus = 'active' | 'archived' | 'completed';
+export type BoardStatus = 'active' | 'archived';
+export type UserRole = 'admin' | 'manager' | 'user';
+
+// API Response Types
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+export interface PaginatedResponse<T = any> extends ApiResponse<T[]> {
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface QueryOptions {
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  filters?: Record<string, any>;
+}
+
+// Task Statistics
+export interface TaskStatistics {
+  totalTasks: number;
+  completedTasks: number;
+  inProgressTasks: number;
+  overdueTasks: number;
+  averageCompletionTime: number;
+}
+export type ProjectSortBy = 'name' | 'createdAt' | 'updatedAt' | 'status' | 'memberCount' | 'taskCount';
+export type BoardSortBy = 'name' | 'created_at' | 'updated_at' | 'task_count';
+export type BoardSortField = 'name' | 'createdAt' | 'updatedAt' | 'position';
+export type TaskSortField = 'title' | 'status' | 'priority' | 'dueDate' | 'createdAt' | 'updatedAt' | 'position' | 'progress';
+export type SortOrder = 'asc' | 'desc';
+
+// Filter types
+export interface BoardFilters {
+  search?: string;
+  projectId?: string;
+  showArchived?: boolean;
+}
+
+// Pagination types
+export interface PaginationParams {
+  page?: number;
+  limit?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+// Type aliases for components
+export type TaskComment = Comment;
+
 // Export all types for easy importing
-export * from './index';

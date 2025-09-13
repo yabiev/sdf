@@ -1,48 +1,60 @@
 // Board Service Implementation
 // Handles business logic for board management
 
-import { IBoardService, IBoardRepository, IBoardValidator } from '../interfaces';
+import { IBoardService, IBoardRepository, IBoardValidator, IColumnRepository, ITaskRepository } from '../interfaces';
 import {
   Board,
+  Column,
   SearchFilters,
   SortOptions,
-  PaginationOptions,
-  ValidationResult
+  PaginationOptions
 } from '../../data/types';
-import { boardRepository } from '../../data/repositories';
+import { boardRepository, columnRepository, taskRepository } from '../../data/repositories';
 import { BoardValidator } from '../validators';
 
 export class BoardService implements IBoardService {
   private repository: IBoardRepository;
+  private columnRepository: IColumnRepository;
   private validator: IBoardValidator;
+  private taskRepository: ITaskRepository;
 
   constructor(
     repository: IBoardRepository = boardRepository,
-    validator: IBoardValidator = new BoardValidator()
+    columnRepo: IColumnRepository = columnRepository,
+    validator: IBoardValidator = new BoardValidator(),
+    taskRepo: ITaskRepository = taskRepository
   ) {
     this.repository = repository;
+    this.columnRepository = columnRepo;
     this.validator = validator;
+    this.taskRepository = taskRepo;
   }
 
-  async getById(id: string): Promise<Board | null> {
-    const validation = this.validator.validateId(id);
-    if (!validation.isValid) {
-      throw new Error(`Invalid board ID: ${validation.errors.join(', ')}`);
+  async getById(id: string, userId: string): Promise<Board> {
+    // Validate ID format
+    if (!id || typeof id !== 'string') {
+      throw new Error('Invalid board ID: ID must be a non-empty string');
     }
 
-    return await this.repository.findById(id);
+    const board = await this.repository.findById(id);
+    if (!board) {
+      throw new Error('Board not found');
+    }
+
+    return board;
   }
 
   async getByProjectId(
     projectId: string,
-    filters?: SearchFilters
+    userId: string,
+    includeArchived?: boolean
   ): Promise<Board[]> {
     const validation = this.validator.validateId(projectId);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findByProjectId(projectId, filters);
+    return await this.repository.findByProjectId(projectId, includeArchived);
   }
 
   async getAll(
@@ -198,8 +210,8 @@ export class BoardService implements IBoardService {
 
   async duplicate(
     id: string,
-    newName?: string,
-    includeCards?: boolean
+    newName: string,
+    userId: string
   ): Promise<Board> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
@@ -212,10 +224,8 @@ export class BoardService implements IBoardService {
       throw new Error('Board not found');
     }
 
-    // Business logic: Generate default name if not provided
-    const duplicateName = newName || `${existingBoard.name} (Copy)`;
-    
-    return await this.repository.duplicate(id, duplicateName, includeCards || false);
+    // Business logic: Use provided name
+    return await this.repository.duplicate(id, newName);
   }
 
   async updatePosition(id: string, position: number): Promise<void> {
@@ -240,89 +250,57 @@ export class BoardService implements IBoardService {
     return await this.repository.getStatistics(id);
   }
 
-  async getColumns(id: string): Promise<Board['columns']> {
+  async getColumns(id: string): Promise<Column[]> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid board ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.getColumns(id);
+    return await this.columnRepository.findByBoardId(id);
   }
 
   async addColumn(
     boardId: string,
-    columnData: Omit<Board['columns'][0], 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<Board['columns'][0]> {
-    const idValidation = this.validator.validateId(boardId);
-    if (!idValidation.isValid) {
-      throw new Error(`Invalid board ID: ${idValidation.errors.join(', ')}`);
-    }
+    columnData: Omit<Column, 'id' | 'createdAt' | 'updatedAt' | 'boardId'>,
+    userId: string
+  ): Promise<Column> {
+    // Validate board access
+    await this.canUserAccess(boardId, userId);
 
-    const columnValidation = this.validator.validateColumn(columnData);
-    if (!columnValidation.isValid) {
-      throw new Error(`Invalid column data: ${columnValidation.errors.join(', ')}`);
-    }
-
-    // Check if board exists
-    const existingBoard = await this.repository.findById(boardId);
-    if (!existingBoard) {
-      throw new Error('Board not found');
-    }
-
-    // Business logic: Cannot add columns to archived board
-    if (existingBoard.isArchived) {
-      throw new Error('Cannot add columns to archived board');
-    }
-
-    // Set default values
+    // Add default values
     const columnWithDefaults = {
       ...columnData,
-      color: columnData.color || '#6B7280',
-      isArchived: columnData.isArchived || false,
-      settings: columnData.settings || {
-        wipLimit: null,
-        autoMoveCards: false,
-        cardTemplate: null
-      }
+      boardId,
+      position: columnData.position ?? 0
     };
 
-    return await this.repository.addColumn(boardId, columnWithDefaults);
+    return this.columnRepository.create(columnWithDefaults);
   }
 
-  async removeColumn(boardId: string, columnId: string): Promise<void> {
-    const boardIdValidation = this.validator.validateId(boardId);
-    if (!boardIdValidation.isValid) {
-      throw new Error(`Invalid board ID: ${boardIdValidation.errors.join(', ')}`);
+  async removeColumn(boardId: string, columnId: string, userId: string): Promise<void> {
+    // Check if user can edit the board
+    if (!(await this.canUserEdit(boardId, userId))) {
+      throw new Error('User does not have permission to edit this board');
     }
 
-    const columnIdValidation = this.validator.validateId(columnId);
-    if (!columnIdValidation.isValid) {
-      throw new Error(`Invalid column ID: ${columnIdValidation.errors.join(', ')}`);
-    }
-
-    // Check if board exists
-    const existingBoard = await this.repository.findById(boardId);
-    if (!existingBoard) {
-      throw new Error('Board not found');
-    }
-
-    // Business logic: Cannot remove columns from archived board
-    if (existingBoard.isArchived) {
-      throw new Error('Cannot remove columns from archived board');
-    }
-
-    // Business logic: Check if column has tasks
-    const columns = await this.repository.getColumns(boardId);
-    const column = columns.find(c => c.id === columnId);
+    // Check if column exists
+    const column = await this.columnRepository.findById(columnId);
     if (!column) {
       throw new Error('Column not found');
     }
 
-    if (column.taskCount && column.taskCount > 0) {
-      throw new Error('Cannot remove column with existing tasks');
+    // Check if column belongs to the board
+    if (column.boardId !== boardId) {
+      throw new Error('Column does not belong to this board');
     }
 
-    await this.repository.removeColumn(boardId, columnId);
+    // Check if column has tasks
+    const tasks = await this.taskRepository.findByColumnId(columnId);
+    if (tasks.length > 0) {
+      throw new Error('Cannot delete column with tasks');
+    }
+
+    await this.columnRepository.delete(columnId);
   }
 
   async reorderColumns(
@@ -358,7 +336,7 @@ export class BoardService implements IBoardService {
     }
 
     // Verify all columns belong to the board
-    const existingColumns = await this.repository.getColumns(boardId);
+    const existingColumns = await this.columnRepository.findByBoardId(boardId);
     const existingColumnIds = existingColumns.map(c => c.id);
     
     for (const columnId of columnIds) {
@@ -372,7 +350,63 @@ export class BoardService implements IBoardService {
       throw new Error('All columns must be included in reorder operation');
     }
 
-    await this.repository.reorderColumns(boardId, columnIds);
+    await this.columnRepository.reorderColumns(boardId, columnIds);
+  }
+
+  async reorder(projectId: string, boardIds: string[], userId: string): Promise<void> {
+    const projectIdValidation = this.validator.validateId(projectId);
+    if (!projectIdValidation.isValid) {
+      throw new Error(`Invalid project ID: ${projectIdValidation.errors.join(', ')}`);
+    }
+
+    if (!Array.isArray(boardIds) || boardIds.length === 0) {
+      throw new Error('Board IDs array is required');
+    }
+
+    // Validate all board IDs
+    for (const boardId of boardIds) {
+      const validation = this.validator.validateId(boardId);
+      if (!validation.isValid) {
+        throw new Error(`Invalid board ID: ${boardId}`);
+      }
+    }
+
+    await this.repository.reorderBoards(projectId, boardIds);
+  }
+
+  async updateColumn(columnId: string, updates: Partial<Column>, userId: string): Promise<Column> {
+    const validation = this.validator.validateId(columnId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid column ID: ${validation.errors.join(', ')}`);
+    }
+
+    const updateValidation = this.validator.validateColumn(updates);
+    if (!updateValidation.isValid) {
+      throw new Error(`Invalid column data: ${updateValidation.errors.join(', ')}`);
+    }
+
+    // Check if column exists
+    const existingColumn = await this.columnRepository.findById(columnId);
+    if (!existingColumn) {
+      throw new Error('Column not found');
+    }
+
+    return await this.columnRepository.update(columnId, updates);
+  }
+
+  async deleteColumn(columnId: string, userId: string): Promise<void> {
+    const validation = this.validator.validateId(columnId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid column ID: ${validation.errors.join(', ')}`);
+    }
+
+    // Check if column exists
+    const existingColumn = await this.columnRepository.findById(columnId);
+    if (!existingColumn) {
+      throw new Error('Column not found');
+    }
+
+    await this.columnRepository.delete(columnId);
   }
 
   async canUserAccess(boardId: string, userId: string): Promise<boolean> {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Project, UpdateProjectData, ProjectStatus } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select } from '../../common';
+import { Project, UpdateProjectData } from '../../../data/types';
+import { Modal, Button, Input, Textarea, Select } from '../common';
 import { ProjectValidator } from '../../../business/validators';
 
 interface EditProjectModalProps {
@@ -18,26 +18,17 @@ const EditProjectModal: React.FC<EditProjectModalProps> = ({
 }) => {
   const [formData, setFormData] = useState<UpdateProjectData>({
     name: project.name,
-    description: project.description,
-    status: project.status
+    description: project.description
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  const statusOptions = [
-    { value: 'active', label: 'Active' },
-    { value: 'on_hold', label: 'On Hold' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' }
-  ];
-
   // Update form data when project changes
   useEffect(() => {
     setFormData({
       name: project.name,
-      description: project.description,
-      status: project.status
+      description: project.description
     });
     setHasChanges(false);
     setErrors({});
@@ -47,32 +38,23 @@ const EditProjectModal: React.FC<EditProjectModalProps> = ({
   useEffect(() => {
     const changed = 
       formData.name !== project.name ||
-      formData.description !== project.description ||
-      formData.status !== project.status;
+      formData.description !== project.description;
     setHasChanges(changed);
   }, [formData, project]);
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    // Validate name
-    const nameValidation = ProjectValidator.validateName(formData.name);
-    if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.errors[0];
-    }
+    // Validate using ProjectValidator.validateUpdate
+    const validator = new ProjectValidator();
+    const validation = validator.validateUpdate(formData);
 
-    // Validate description (optional)
-    if (formData.description) {
-      const descValidation = ProjectValidator.validateDescription(formData.description);
-      if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
-      }
-    }
-
-    // Validate status
-    const statusValidation = ProjectValidator.validateStatus(formData.status);
-    if (!statusValidation.isValid) {
-      newErrors.status = statusValidation.errors[0];
+    if (!validation.isValid) {
+      validation.errors.forEach(error => {
+        if (error.field && error.message) {
+          newErrors[error.field] = error.message;
+        }
+      });
     }
 
     setErrors(newErrors);
@@ -106,11 +88,9 @@ const EditProjectModal: React.FC<EditProjectModalProps> = ({
   const handleClose = () => {
     setFormData({
       name: project.name,
-      description: project.description,
-      status: project.status
+      description: project.description
     });
     setErrors({});
-    setIsSubmitting(false);
     setHasChanges(false);
     onClose();
   };
@@ -126,8 +106,7 @@ const EditProjectModal: React.FC<EditProjectModalProps> = ({
   const handleReset = () => {
     setFormData({
       name: project.name,
-      description: project.description,
-      status: project.status
+      description: project.description
     });
     setErrors({});
     setHasChanges(false);
@@ -174,20 +153,7 @@ const EditProjectModal: React.FC<EditProjectModalProps> = ({
           />
         </div>
 
-        {/* Project Status */}
-        <div>
-          <label htmlFor="edit-project-status" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Status *
-          </label>
-          <Select
-            id="edit-project-status"
-            value={formData.status}
-            onChange={(value) => handleInputChange('status', value)}
-            options={statusOptions}
-            error={errors.status}
-            disabled={isSubmitting}
-          />
-        </div>
+
 
         {/* Changes Indicator */}
         {hasChanges && (
@@ -274,4 +240,5 @@ const EditProjectModal: React.FC<EditProjectModalProps> = ({
   );
 };
 
+export { EditProjectModal };
 export default EditProjectModal;

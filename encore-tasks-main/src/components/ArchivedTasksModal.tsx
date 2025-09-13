@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { X, Calendar, User, Filter, Search, Archive, RotateCcw, Trash2 } from "lucide-react";
-import { Task, User as UserType } from "@/types";
+import { X, Calendar, User, Search, Archive, RotateCcw, Trash2 } from "lucide-react";
+import { User as UserType } from "@/types";
 import { useApp } from "@/contexts/AppContext";
 import { formatDate } from "@/lib/utils";
 import { CustomSelect } from "./CustomSelect";
@@ -16,7 +16,7 @@ interface ArchivedTasksModalProps {
 
 function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProps) {
   const { state, dispatch } = useApp();
-  const { ConfirmationComponent, confirm } = useConfirmation();
+  const { confirm } = useConfirmation();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAssignee, setSelectedAssignee] = useState("");
   const [selectedPriority, setSelectedPriority] = useState("");
@@ -49,24 +49,24 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
       return [];
     }
     
-    let filtered = state.archivedTasks.filter(task => {
-      if (task.boardId !== boardId) return false;
+    const filtered = state.archivedTasks.filter(task => {
+      if (task.board_id !== boardId) return false;
       
       const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             task.description?.toLowerCase().includes(searchTerm.toLowerCase());
       
       const matchesAssignee = !selectedAssignee || 
-                             (task.assignees && Array.isArray(task.assignees) && task.assignees.some(assignee => assignee.id === selectedAssignee)) ||
-                             task.assignee?.id === selectedAssignee;
+                             task.assignee_id === selectedAssignee;
       
       const matchesPriority = !selectedPriority || task.priority === selectedPriority;
       
       let matchesDate = true;
       if (dateFilter) {
         const filterDate = new Date(dateFilter);
-        const taskDate = task.completedAt || task.archivedAt;
+        const taskDate = task.updated_at;
         if (taskDate) {
-          const taskDateOnly = new Date(taskDate.getFullYear(), taskDate.getMonth(), taskDate.getDate());
+          const taskDateObj = new Date(taskDate);
+          const taskDateOnly = new Date(taskDateObj.getFullYear(), taskDateObj.getMonth(), taskDateObj.getDate());
           const filterDateOnly = new Date(filterDate.getFullYear(), filterDate.getMonth(), filterDate.getDate());
           matchesDate = taskDateOnly.getTime() === filterDateOnly.getTime();
         }
@@ -77,16 +77,16 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
 
     // Сортировка
     filtered.sort((a, b) => {
-      let aValue: any, bValue: any;
+      let aValue: string | undefined, bValue: string | undefined;
       
       switch (sortBy) {
         case "completedAt":
-          aValue = a.completedAt || a.archivedAt;
-          bValue = b.completedAt || b.archivedAt;
+          aValue = a.updated_at;
+          bValue = b.updated_at;
           break;
         case "archivedAt":
-          aValue = a.archivedAt;
-          bValue = b.archivedAt;
+          aValue = a.updated_at;
+          bValue = b.updated_at;
           break;
         case "title":
           aValue = a.title.toLowerCase();
@@ -113,19 +113,16 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
   }, [state.archivedTasks, boardId, searchTerm, selectedAssignee, selectedPriority, dateFilter, sortBy, sortOrder]);
 
   const availableUsers = useMemo(() => {
-    const users = new Set<UserType>();
+    const userIds = new Set<string>();
     if (state.archivedTasks && Array.isArray(state.archivedTasks)) {
       state.archivedTasks.forEach(task => {
-        if (task.boardId === boardId) {
-          if (task.assignees && Array.isArray(task.assignees)) {
-            task.assignees.forEach(assignee => users.add(assignee));
-          }
-          if (task.assignee) users.add(task.assignee);
+        if (task.board_id === boardId && task.assignee_id) {
+          userIds.add(task.assignee_id);
         }
       });
     }
-    return Array.from(users);
-  }, [state.archivedTasks, boardId]);
+    return state.users.filter(user => userIds.has(user.id));
+  }, [state.archivedTasks, state.users, boardId]);
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -145,7 +142,7 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
             <Archive className="w-6 h-6 text-primary-400" />
             <h2 className="text-xl font-semibold text-white">Архивированные задачи</h2>
             <span className="px-2 py-1 bg-primary-500/20 text-primary-300 rounded text-sm">
-              {filteredAndSortedTasks.length} из {(state.archivedTasks || []).filter(task => task.boardId === boardId).length}
+              {filteredAndSortedTasks.length} из {(state.archivedTasks || []).filter(task => task.board_id === boardId).length}
             </span>
           </div>
           <button
@@ -223,7 +220,7 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
             <span className="text-gray-400 text-sm">Сортировка:</span>
             <CustomSelect
               value={sortBy}
-              onChange={(value) => setSortBy(value as any)}
+              onChange={(value) => setSortBy(value as "archivedAt" | "completedAt" | "title")}
               options={[
                 { value: "archivedAt", label: "По дате архивирования" },
                 { value: "completedAt", label: "По дате завершения" },
@@ -247,7 +244,7 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
             <div className="text-center py-12">
               <Archive className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-400">
-                {(state.archivedTasks || []).filter(task => task.boardId === boardId).length === 0 ? "Нет архивированных задач" : "Задачи не найдены"}
+                {(state.archivedTasks || []).filter(task => task.board_id === boardId).length === 0 ? "Нет архивированных задач" : "Задачи не найдены"}
               </p>
             </div>
           ) : (
@@ -276,26 +273,17 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
                            task.priority === 'medium' ? 'Средний' : 'Низкий'}
                         </span>
                         
-                        {task.assignees && Array.isArray(task.assignees) && task.assignees.length > 0 && (
+                        {task.assignee_id && (
                           <div className="flex items-center gap-1">
                             <User className="w-3 h-3" />
-                            <span>{task.assignees?.map(a => a.name).join(', ') || 'Не назначено'}</span>
+                            <span>{state.users.find(u => u.id === task.assignee_id)?.name || 'Не назначено'}</span>
                           </div>
                         )}
                         
-                        {task.completedAt && (
-                          <div className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            <span>Завершено: {formatDate(new Date(task.completedAt))}</span>
-                          </div>
-                        )}
-                        
-                        {task.archivedAt && (
-                          <div className="flex items-center gap-1">
-                            <Archive className="w-3 h-3" />
-                            <span>Архивировано: {formatDate(new Date(task.archivedAt))}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>Обновлено: {formatDate(new Date(task.updated_at))}</span>
+                        </div>
                       </div>
                     </div>
                     
@@ -325,7 +313,6 @@ function ArchivedTasksModal({ isOpen, onClose, boardId }: ArchivedTasksModalProp
           )}
         </div>
       </div>
-      {ConfirmationComponent()}
     </div>
   );
 }

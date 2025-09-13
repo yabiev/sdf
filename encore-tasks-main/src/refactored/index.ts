@@ -1,7 +1,11 @@
 // Export all layers
 export * from './presentation';
 export * from './business';
-export * from './data';
+// Export data layer modules
+export * from './data/adapters/database-adapter';
+export * from './data/repositories';
+// Export data types with explicit naming to avoid conflicts
+export type { BoardFilters as DataBoardFilters } from './data/types';
 
 // Export main service factory for easy access
 export { ServiceFactory } from './business/services';

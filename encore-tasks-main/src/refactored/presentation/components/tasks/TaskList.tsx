@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { Task, TaskFilters, CreateTaskData, UpdateTaskData } from '../../../data/types';
+import React, { useState, useEffect } from 'react';
+import { TaskFilters, CreateTaskData, UpdateTaskData } from '../../../data/types';
 import { useTasks } from '../../hooks/useTasks';
-import { AuthContext } from '../../contexts/AuthContext';
-import { TaskCard } from './TaskCard';
-import { TaskFilters as TaskFiltersComponent } from './TaskFilters';
-import { CreateTaskModal } from './CreateTaskModal';
-import { LoadingSpinner, ErrorMessage, EmptyState, Pagination, Button } from '../../common';
+import { useAuth } from '../../context/AuthContext';
+import TaskCard from './TaskCard';
+import TaskFiltersComponent from './TaskFilters';
+import CreateTaskModal from './CreateTaskModal';
+import { LoadingSpinner, ErrorMessage, EmptyState, Pagination, Button } from '../common';
 import { useDebounce } from '../../hooks/useDebounce';
 
 interface TaskListProps {
@@ -27,7 +27,7 @@ const TaskList: React.FC<TaskListProps> = ({
   pageSize = 20,
   className = ''
 }) => {
-  const { user } = useContext(AuthContext);
+  const { user } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -41,8 +41,7 @@ const TaskList: React.FC<TaskListProps> = ({
     isCreating,
     error,
     filters,
-    sortField,
-    sortOrder,
+    sort,
     loadTasks,
     createTask,
     updateTask,
@@ -50,17 +49,16 @@ const TaskList: React.FC<TaskListProps> = ({
     archiveTask,
     restoreTask,
     setFilters,
-    setSorting,
+    setSort,
     setPage,
-    resetFilters,
-    clearError
+    clearFilters
   } = useTasks({
     columnId,
     boardId,
     projectId,
     autoLoad: true,
     pageSize,
-    initialFilters: {
+    filters: {
       search: debouncedSearch
     }
   });
@@ -117,7 +115,7 @@ const TaskList: React.FC<TaskListProps> = ({
   };
 
   const handleSortChange = (field: string, order: 'asc' | 'desc') => {
-    setSorting(field as any, order);
+    setSort({ field: field as any, order });
   };
 
   const handlePageChange = (page: number) => {
@@ -126,7 +124,7 @@ const TaskList: React.FC<TaskListProps> = ({
 
   const handleResetFilters = () => {
     setSearchQuery('');
-    resetFilters();
+    clearFilters();
   };
 
   const canCreateTask = user && (
@@ -141,7 +139,6 @@ const TaskList: React.FC<TaskListProps> = ({
         <ErrorMessage 
           message={error} 
           onRetry={loadTasks}
-          onDismiss={clearError}
         />
       </div>
     );
@@ -201,8 +198,8 @@ const TaskList: React.FC<TaskListProps> = ({
       {showFilters && (
         <TaskFiltersComponent
           filters={filters}
-          sortField={sortField}
-          sortOrder={sortOrder}
+          sortField={sort.field}
+          sortOrder={sort.order}
           onFiltersChange={handleFiltersChange}
           onSortChange={handleSortChange}
           onReset={handleResetFilters}
@@ -264,7 +261,6 @@ const TaskList: React.FC<TaskListProps> = ({
                 currentPage={currentPage}
                 totalPages={totalPages}
                 onPageChange={handlePageChange}
-                showPageNumbers
               />
             </div>
           )}

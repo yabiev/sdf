@@ -23,6 +23,7 @@ import {
   TaskStatus,
   TaskPriority
 } from '../../types/board.types';
+import { SearchFilters } from '../../refactored/data/types';
 
 /**
  * Интерфейс репозитория для задач
@@ -32,10 +33,10 @@ export interface ITaskRepository {
   // Основные CRUD операции
   findById(id: TaskId): Promise<Task | null>;
   findByIds(ids: TaskId[]): Promise<Task[]>;
-  findByBoardId(boardId: BoardId, filters?: TaskFilters): Promise<Task[]>;
-  findByColumnId(columnId: ColumnId, filters?: TaskFilters): Promise<Task[]>;
-  findByProjectId(projectId: ProjectId, filters?: TaskFilters): Promise<Task[]>;
-  findAll(filters?: TaskFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<PaginatedResponse<Task>>;
+  findByBoardId(boardId: BoardId, filters?: SearchFilters): Promise<Task[]>;
+  findByColumnId(columnId: ColumnId, filters?: SearchFilters): Promise<Task[]>;
+  findByProjectId(projectId: ProjectId, filters?: SearchFilters): Promise<Task[]>;
+  findAll(filters?: SearchFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<PaginatedResponse<Task>>;
   create(taskData: CreateTaskDto & { createdBy: UserId; reporterId: UserId }): Promise<Task>;
   update(id: TaskId, taskData: UpdateTaskDto, updatedBy: UserId): Promise<Task | null>;
   delete(id: TaskId): Promise<boolean>;
@@ -48,8 +49,8 @@ export interface ITaskRepository {
   updatePriority(id: TaskId, priority: TaskPriority, updatedBy: UserId): Promise<boolean>;
   moveToColumn(id: TaskId, columnId: ColumnId, position: number, updatedBy: UserId): Promise<boolean>;
   getMaxPosition(columnId: ColumnId): Promise<number>;
-  getTasksByAssignee(assigneeId: UserId, filters?: TaskFilters): Promise<Task[]>;
-  getTasksByReporter(reporterId: UserId, filters?: TaskFilters): Promise<Task[]>;
+  getTasksByAssignee(assigneeId: UserId, filters?: SearchFilters): Promise<Task[]>;
+  getTasksByReporter(reporterId: UserId, filters?: SearchFilters): Promise<Task[]>;
   getSubtasks(parentTaskId: TaskId): Promise<Task[]>;
   getTaskDependencies(taskId: TaskId): Promise<Task[]>;
   countByColumn(columnId: ColumnId): Promise<number>;
@@ -80,8 +81,8 @@ export interface ITaskAssignmentService {
   unassignTask(taskId: TaskId, assigneeIds: UserId[], unassignedBy: UserId): Promise<OperationResult>;
   reassignTask(taskId: TaskId, fromUserId: UserId, toUserId: UserId, reassignedBy: UserId): Promise<OperationResult>;
   getTaskAssignees(taskId: TaskId): Promise<OperationResult<UserId[]>>;
-  getUserAssignedTasks(userId: UserId, filters?: TaskFilters): Promise<OperationResult<Task[]>>;
-  getAssignmentHistory(taskId: TaskId): Promise<OperationResult<any[]>>;
+  getUserAssignedTasks(userId: UserId, filters?: SearchFilters): Promise<OperationResult<Task[]>>;
+  getAssignmentHistory(taskId: TaskId): Promise<OperationResult<unknown[]>>;
 }
 
 /**
@@ -105,9 +106,9 @@ export interface ITaskTimeTrackingService {
   startTimer(taskId: TaskId, userId: UserId): Promise<OperationResult>;
   stopTimer(taskId: TaskId, userId: UserId): Promise<OperationResult>;
   logTime(taskId: TaskId, hours: number, description: string, userId: UserId): Promise<OperationResult>;
-  getTimeEntries(taskId: TaskId): Promise<OperationResult<any[]>>;
+  getTimeEntries(taskId: TaskId): Promise<OperationResult<unknown[]>>;
   getTotalTime(taskId: TaskId): Promise<OperationResult<number>>;
-  getUserTimeEntries(userId: UserId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any[]>>;
+  getUserTimeEntries(userId: UserId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<unknown[]>>;
   updateEstimate(taskId: TaskId, estimatedHours: number, updatedBy: UserId): Promise<OperationResult>;
 }
 
@@ -145,9 +146,9 @@ export interface ITaskNotificationService {
 export interface ITaskService {
   // Основные операции
   getTaskById(id: TaskId, userId: UserId): Promise<OperationResult<Task>>;
-  getTasksByBoard(boardId: BoardId, userId: UserId, filters?: TaskFilters): Promise<OperationResult<Task[]>>;
-  getTasksByColumn(columnId: ColumnId, userId: UserId, filters?: TaskFilters): Promise<OperationResult<Task[]>>;
-  getAllTasks(userId: UserId, filters?: TaskFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<OperationResult<PaginatedResponse<Task>>>;
+  getTasksByBoard(boardId: BoardId, userId: UserId, filters?: SearchFilters): Promise<OperationResult<Task[]>>;
+  getTasksByColumn(columnId: ColumnId, userId: UserId, filters?: SearchFilters): Promise<OperationResult<Task[]>>;
+  getAllTasks(userId: UserId, filters?: SearchFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<OperationResult<PaginatedResponse<Task>>>;
   createTask(taskData: CreateTaskDto, userId: UserId): Promise<OperationResult<Task>>;
   updateTask(id: TaskId, taskData: UpdateTaskDto, userId: UserId): Promise<OperationResult<Task>>;
   deleteTask(id: TaskId, userId: UserId): Promise<OperationResult<boolean>>;
@@ -177,8 +178,8 @@ export interface ITaskService {
   logTime(taskId: TaskId, hours: number, description: string, userId: UserId): Promise<OperationResult>;
   
   // Статистика и отчеты
-  getTaskStatistics(boardId: BoardId, userId: UserId): Promise<OperationResult<any>>;
-  getUserTaskStatistics(userId: UserId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
+  getTaskStatistics(boardId: BoardId, userId: UserId): Promise<OperationResult<unknown>>;
+  getUserTaskStatistics(userId: UserId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<unknown>>;
   
   // События
   getTaskEvents(taskId: TaskId, userId: UserId, limit?: number): Promise<OperationResult<TaskEvent[]>>;
@@ -217,7 +218,7 @@ export interface ITaskCacheService {
  * Отвечает только за поиск (Single Responsibility)
  */
 export interface ITaskSearchService {
-  searchTasks(query: string, userId: UserId, filters?: TaskFilters): Promise<OperationResult<Task[]>>;
+  searchTasks(query: string, userId: UserId, filters?: SearchFilters): Promise<OperationResult<Task[]>>;
   indexTask(task: Task): Promise<void>;
   removeFromIndex(taskId: TaskId): Promise<void>;
   updateIndex(task: Task): Promise<void>;
@@ -229,9 +230,9 @@ export interface ITaskSearchService {
  * Отвечает только за импорт/экспорт (Single Responsibility)
  */
 export interface ITaskImportExportService {
-  exportTasks(boardId: BoardId, format: 'json' | 'csv' | 'excel', filters?: TaskFilters): Promise<OperationResult<Buffer>>;
+  exportTasks(boardId: BoardId, format: 'json' | 'csv' | 'excel', filters?: SearchFilters): Promise<OperationResult<Buffer>>;
   importTasks(data: Buffer, format: 'json' | 'csv' | 'excel', boardId: BoardId, userId: UserId): Promise<OperationResult<Task[]>>;
   validateImportData(data: Buffer, format: 'json' | 'csv' | 'excel'): Promise<OperationResult>;
-  exportTasksToJira(boardId: BoardId, jiraConfig: any): Promise<OperationResult>;
-  importTasksFromJira(jiraConfig: any, boardId: BoardId, userId: UserId): Promise<OperationResult<Task[]>>;
+  exportTasksToJira(boardId: BoardId, jiraConfig: Record<string, unknown>): Promise<OperationResult>;
+  importTasksFromJira(jiraConfig: Record<string, unknown>, boardId: BoardId, userId: UserId): Promise<OperationResult<Task[]>>;
 }

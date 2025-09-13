@@ -1,292 +1,304 @@
-"use client";
-
-import React, { memo, useMemo, useCallback, useEffect } from "react";
-import { useDroppable } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy } from
-"@dnd-kit/sortable";
-import { Column, Task } from "@/types";
-import { TaskCard } from "./TaskCard";
-import { cn } from "@/lib/utils";
-import { Plus, MoreHorizontal } from "lucide-react";
-import CompletedTasksBlock from "./CompletedTasksBlock";
-import { useApp } from "@/contexts/AppContext";
+import React, { useState } from 'react';
+import { Plus, MoreHorizontal, Edit, Trash2, Users, Calendar, AlertCircle } from 'lucide-react';
+import { Column, Task, User } from '@/types';
+import { useApp } from '@/contexts/AppContext';
+import { toast } from 'sonner';
+import KanbanTask from './KanbanTask';
+import CreateTaskModal from './CreateTaskModal';
 
 interface KanbanColumnProps {
   column: Column;
   tasks: Task[];
-  onAddTask?: () => void;
-  onTaskClick?: (task: Task) => void;
-  onViewCompleted?: () => void;
+  projectUsers: User[];
+  project: any;
+  canManage: boolean;
+  onTaskDragStart: (task: Task) => void;
+  onTaskDragEnd: () => void;
+  onTaskCreate: (task: Task) => void;
+  onTaskUpdate: (taskId: number, updates: Partial<Task>) => void;
+  onTaskDelete: (taskId: number) => void;
+  onColumnUpdate: (columnId: number, updates: Partial<Column>) => void;
+  onColumnDelete: (columnId: number) => void;
 }
 
-const KanbanColumnComponent = ({
+const COLUMN_TYPE_COLORS = {
+  TODO: 'bg-gray-100 border-gray-300',
+  IN_PROGRESS: 'bg-blue-50 border-blue-300',
+  REVIEW: 'bg-yellow-50 border-yellow-300',
+  DONE: 'bg-green-50 border-green-300',
+  BLOCKED: 'bg-red-50 border-red-300',
+};
+
+const COLUMN_TYPE_ICONS = {
+  TODO: '📋',
+  IN_PROGRESS: '⚡',
+  REVIEW: '👀',
+  DONE: '✅',
+  BLOCKED: '🚫',
+};
+
+const KanbanColumn: React.FC<KanbanColumnProps> = ({
   column,
-  tasks,
-  onAddTask,
-  onTaskClick,
-  onViewCompleted
-}: KanbanColumnProps) => {
+  index,
+  isDragOver,
+  canManage,
+  projectUsers,
+  onTaskDragStart,
+  onTaskDragEnd,
+  onTaskDrop,
+  onColumnDragStart,
+  onColumnDragEnd,
+  onColumnDrop,
+  onColumnDragOver,
+  onColumnDragLeave,
+  onTaskUpdate,
+  onColumnUpdate,
+  onCreateTask,
+}) => {
+  const [showMenu, setShowMenu] = useState(false);
+  const [dragOverTaskIndex, setDragOverTaskIndex] = useState<number | null>(null);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
 
-  const { state, dispatch } = useApp();
-  const droppableData = useMemo(() => ({
-    type: "column" as const,
-    column: column,
-    accepts: ["task"] as const
-  }), [column]);
-  
-  const { setNodeRef, isOver } = useDroppable({
-    id: column.id,
-    data: droppableData
-  });
-  
-  const taskIds = useMemo(() => tasks.map(task => task.id), [tasks]);
-  
-  const handleTaskClick = useCallback((task: Task) => {
-    onTaskClick?.(task);
-  }, [onTaskClick]);
-  
-  const handleAddTask = useCallback(() => {
-    onAddTask?.();
-  }, [onAddTask]);
+  const tasks = (column.tasks || []).sort((a, b) => (a.position || 0) - (b.position || 0));
+  const columnColorClass = COLUMN_TYPE_COLORS[column.type] || COLUMN_TYPE_COLORS.TODO;
+  const columnIcon = COLUMN_TYPE_ICONS[column.type] || COLUMN_TYPE_ICONS.TODO;
 
-  // Логика автоматического архивирования для колонки Done
-  useEffect(() => {
-    if ((column.name === "Done" || column.name === "Выполнено") && tasks.length > 0) {
-      const timer = setTimeout(() => {
-        const now = new Date();
-        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        
-        // Архивируем старые задачи (больше недели)
-        const oldTasks = tasks.filter(task => {
-          const completedDate = task.completedAt || task.updatedAt;
-          return completedDate && new Date(completedDate) < oneWeekAgo;
-        });
-        
-        // Архивируем старые задачи по одной с интервалом
-        oldTasks.forEach((task, index) => {
-          setTimeout(() => {
-            dispatch({ type: "ARCHIVE_TASK", payload: task.id });
-          }, index * 100);
-        });
-        
-        // Если задач больше 5 (после архивирования старых), архивируем самые старые
-        setTimeout(() => {
-          const remainingTasks = tasks.filter(task => !oldTasks.includes(task));
-          if (remainingTasks.length > 5) {
-            const sortedTasks = [...remainingTasks]
-              .sort((a, b) => {
-                const aDate = a.completedAt || a.updatedAt;
-                const bDate = b.completedAt || b.updatedAt;
-                return new Date(aDate).getTime() - new Date(bDate).getTime();
-              });
-            
-            const tasksToArchive = sortedTasks.slice(0, remainingTasks.length - 5);
-            
-            tasksToArchive.forEach((task, index) => {
-              setTimeout(() => {
-                dispatch({ type: "ARCHIVE_TASK", payload: task.id });
-              }, index * 100);
-            });
-          }
-        }, oldTasks.length * 100 + 200);
-      }, 1000); // Задержка в 1 секунду
+  // Обработка перетаскивания задач внутри колонки
+  const handleTaskDragOver = (e: React.DragEvent, taskIndex: number) => {
+    e.preventDefault();
+    setDragOverTaskIndex(taskIndex);
+  };
+
+  const handleTaskDragLeave = () => {
+    setDragOverTaskIndex(null);
+  };
+
+  const handleTaskDropOnTask = (targetIndex: number) => {
+    onTaskDrop(targetIndex);
+    setDragOverTaskIndex(null);
+  };
+
+  // Обработка перетаскивания в пустую область колонки
+  const handleColumnDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    onTaskDrop(); // Добавить в конец колонки
+  };
+
+  // Получение статистики колонки
+  const getColumnStats = () => {
+    const totalTasks = tasks.length;
+    const urgentTasks = tasks.filter(task => {
+      if (!task.dueDate) return false;
+      const dueDate = new Date(task.dueDate);
+      const now = new Date();
+      const diffDays = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      return diffDays <= 1;
+    }).length;
+
+    const assignedUsers = new Set(
+      tasks.flatMap(task => task.assignees?.map(a => a.userId) || [])
+    ).size;
+
+    return { totalTasks, urgentTasks, assignedUsers };
+  };
+
+  const stats = getColumnStats();
+
+  // Создание новой задачи
+  const handleCreateTaskSubmit = async (taskData: Partial<Task>) => {
+    setIsCreatingTask(true);
+    try {
+      const createdTask = await projectService.createTask(column.id, taskData);
       
-      return () => clearTimeout(timer);
+      // Обновляем локальное состояние
+      onTaskCreate(createdTask);
+      
+      toast.success('Задача создана');
+    } catch (error) {
+      console.error('Ошибка при создании задачи:', error);
+      toast.error('Не удалось создать задачу');
+      throw error;
+    } finally {
+      setIsCreatingTask(false);
     }
-  }, [column.name, tasks.length, dispatch]);
+  };
 
-  const handleViewCompleted = useCallback(() => {
-    onViewCompleted?.();
-  }, [onViewCompleted]);
+  // Обновление задачи
+  const handleUpdateTask = async (taskId: number, updates: Partial<Task>) => {
+    try {
+      await projectService.updateTask(taskId, updates);
+      onTaskUpdate(taskId, updates);
+      toast.success('Задача обновлена');
+    } catch (error) {
+      console.error('Ошибка при обновлении задачи:', error);
+      toast.error('Не удалось обновить задачу');
+    }
+  };
 
-  // Подсчитываем количество архивированных задач для этой доски
-  const archivedTasksCount = useMemo(() => {
-    return state.archivedTasks.filter(task => 
-      task.boardId === state.selectedBoard?.id && task.status === "done"
-    ).length;
-  }, [state.archivedTasks, state.selectedBoard?.id]);
+  // Удаление задачи
+  const handleDeleteTask = async (taskId: number) => {
+    if (!confirm('Вы уверены, что хотите удалить эту задачу?')) {
+      return;
+    }
 
-  const isDoneColumn = column.name === "Done" || column.name === "Выполнено";
+    try {
+      await projectService.deleteTask(taskId);
+      onTaskDelete(taskId);
+      toast.success('Задача удалена');
+    } catch (error) {
+      console.error('Ошибка при удалении задачи:', error);
+      toast.error('Не удалось удалить задачу');
+    }
+  };
 
   return (
     <div
-      ref={setNodeRef}
-      className={cn(
-        "flex flex-col h-full min-w-[260px] w-[280px] lg:min-w-[280px] lg:max-w-[320px] flex-shrink-0 animate-scale-in hover-lift transition-all duration-300",
-        isOver && "ring-2 ring-primary-500/30 scale-[1.01] bg-primary-500/10"
-      )}
-      data-oid="baevvrb">
-
-      {/* Column header */}
-      <div
-        className="flex items-center justify-between p-3 lg:p-4 backdrop-blur-sm border border-white/10 rounded-t-lg flex-shrink-0 animate-slide-in-left animate-delay-100"
-        style={{ backgroundColor: `${column.color}20` }}
-        data-oid="x9qxwd-">
-
-        <div className="flex items-center gap-2" data-oid="zp7bg-6">
-          <div
-            className="w-3 h-3 rounded-full animate-bounce-in animate-delay-200"
-            style={{ backgroundColor: column.color || "#6b7280" }}
-            data-oid="zknb_rz" />
-
-
-          <h3 className="font-medium text-white animate-slide-in-left animate-delay-300" data-oid="uc-rl45">
-            {column.name}
-          </h3>
-          <span
-            className="px-2 py-1 text-xs bg-white/10 text-gray-300 rounded-full badge animate-delay-400"
-            data-oid="ucetj-m">
-
-            {tasks.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-1" data-oid="k:fwdbq">
-          <button
-            onClick={handleAddTask}
-            className="p-1 hover:bg-white/10 rounded transition-colors"
-            title="Добавить задачу"
-            data-oid="0vd2-:n">
-
-            <Plus className="w-4 h-4 text-gray-400" data-oid="0-5f3lo" />
-          </button>
-          <button
-            className="p-1 hover:bg-white/10 rounded transition-colors"
-            data-oid="qewdylh">
-
-            <MoreHorizontal
-              className="w-4 h-4 text-gray-400"
-              data-oid="d90:62i" />
-
-          </button>
-        </div>
-      </div>
-
-      {/* Tasks container */}
-      <div
-        data-column-id={column.id}
-        className={cn(
-          "flex-1 p-3 lg:p-4 bg-white/5 backdrop-blur-sm border-x border-b border-white/10 rounded-b-lg transition-all duration-200 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-transparent",
-          tasks.length === 0 ? "min-h-[400px]" : "min-h-[200px]"
-        )}
-        data-oid="0_737rg">
-
-        <SortableContext
-          items={taskIds}
-          strategy={verticalListSortingStrategy}
-          data-oid="md:ek_j">
-
-          <div 
-            className="space-y-3" 
-            data-oid="ojk-ldx">
-            {tasks.map((task) =>
-            <TaskCard
-              key={task.id}
-              task={task}
-              onViewDetails={() => handleTaskClick(task)}
-              onEdit={() => handleTaskClick(task)}
-              data-oid="nko.htr" />
-
-            )}
-
-            {/* Empty column drop zone */}
-            {tasks.length === 0 && (
-              <div 
-                className={cn(
-                  "w-full p-8 border-2 border-dashed border-white/20 rounded-lg transition-all min-h-[200px] flex flex-col items-center justify-center gap-4",
-                  isOver ? "border-primary-500/50 bg-primary-500/10" : "border-white/20"
-                )}>
-                <div className="text-center text-gray-400">
-                  <div className="text-sm opacity-60">
-                    {isOver ? "Отпустите, чтобы переместить задачу сюда" : "Перетащите задачу сюда"}
-                  </div>
-                </div>
-                
-                {/* Add task button inside drop zone */}
-                {onAddTask && (
+      className={`flex-shrink-0 w-72 bg-white rounded-lg border-2 transition-all duration-200 ${
+        isDragOver ? 'border-blue-400 bg-blue-50' : columnColorClass
+      }`}
+      draggable={canManage}
+      onDragStart={canManage ? onColumnDragStart : undefined}
+      onDragEnd={onColumnDragEnd}
+      onDragOver={onColumnDragOver}
+      onDragLeave={onColumnDragLeave}
+      onDrop={handleColumnDrop}
+    >
+      {/* Заголовок колонки */}
+      <div className="p-4 border-b border-gray-200">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center space-x-2">
+            <span className="text-lg">{columnIcon}</span>
+            <h3 className="font-semibold text-gray-900 truncate">
+              {column.name}
+            </h3>
+            <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded-full">
+              {stats.totalTasks}
+            </span>
+          </div>
+          
+          {canManage && (
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              
+              {showMenu && (
+                <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-32">
                   <button
-                  onClick={(e) => {
-                     e.preventDefault();
-                     e.stopPropagation();
-                     handleAddTask();
-                   }}
-                  className="px-4 py-2 border-2 border-dashed border-white/30 bg-white/5 rounded-lg text-white/70 hover:border-white/50 hover:text-white transition-all group flex items-center gap-2"
-                  data-oid="i7h0k2e">
-                    <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                    <span className="text-sm">Добавить задачу</span>
+                    onClick={() => {
+                      setShowMenu(false);
+                      // TODO: Добавить редактирование колонки
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
+                  >
+                    <Edit size={14} />
+                    <span>Изменить</span>
                   </button>
-                )}
+                  <button
+                    onClick={() => {
+                      setShowMenu(false);
+                      // TODO: Добавить удаление колонки
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+                  >
+                    <Trash2 size={14} />
+                    <span>Удалить</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Статистика колонки */}
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <div className="flex items-center space-x-3">
+            {stats.urgentTasks > 0 && (
+              <div className="flex items-center space-x-1 text-red-600">
+                <AlertCircle size={12} />
+                <span>{stats.urgentTasks} срочных</span>
               </div>
             )}
-
-            {/* Add task button for non-empty columns */}
-            {tasks.length > 0 && onAddTask && (
-            <button
-              onClick={(e) => {
-                 e.preventDefault();
-                 e.stopPropagation();
-                 handleAddTask();
-               }}
-              className="w-full p-4 border-2 border-dashed border-white/30 bg-white/5 rounded-lg text-white/70 hover:border-white/50 hover:text-white transition-all group mt-3"
-              data-oid="i7h0k2e-nonempty">
-
-                <div
-                className="flex flex-col items-center gap-2"
-                data-oid="74fq3xl">
-
-                  <Plus
-                  className="w-6 h-6 group-hover:scale-110 transition-transform"
-                  data-oid="d00xrgp" />
-
-                  <span className="text-sm" data-oid="ip_3ezx">
-                    Добавить задачу
-                  </span>
-                </div>
-              </button>
-            )}
-
-            {/* Drop zone indicator when dragging */}
-            {isOver && tasks.length > 0 && (
-              <div className="space-y-2">
-                <div className="w-full h-1 bg-primary-500/50 rounded-full animate-pulse" />
-                <div className="w-full p-4 border-2 border-dashed border-primary-500/50 bg-primary-500/10 rounded-lg flex items-center justify-center">
-                  <div className="text-primary-300 text-sm font-medium animate-pulse">
-                    Отпустите, чтобы переместить задачу сюда
-                  </div>
-                </div>
-                <div className="w-full h-1 bg-primary-500/50 rounded-full animate-pulse" />
+            {stats.assignedUsers > 0 && (
+              <div className="flex items-center space-x-1">
+                <Users size={12} />
+                <span>{stats.assignedUsers} участников</span>
               </div>
             )}
           </div>
-        </SortableContext>
-        
-        {/* Completed Tasks Block for Done column */}
-        {isDoneColumn && (
-          <CompletedTasksBlock
-            completedTasksCount={archivedTasksCount}
-            onViewCompleted={handleViewCompleted}
+          
+          {canManage && (
+            <button
+              onClick={onCreateTask}
+              className="text-blue-600 hover:text-blue-700 flex items-center space-x-1"
+            >
+              <Plus size={12} />
+              <span>Добавить</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Список задач */}
+      <div className="flex-1 p-2 space-y-2 min-h-32 max-h-96 overflow-y-auto">
+        {tasks.map((task, taskIndex) => (
+          <KanbanTask
+            key={task.id}
+            task={task}
+            projectUsers={projectUsers}
+            canManage={canManage}
+            onDragStart={() => onTaskDragStart(task)}
+            onDragEnd={onTaskDragEnd}
+            onUpdate={(updates) => handleUpdateTask(task.id, updates)}
+            onDelete={() => handleDeleteTask(task.id)}
           />
+        ))}
+
+        {/* Область для перетаскивания в пустую колонку */}
+        {tasks.length === 0 && (
+          <div
+            className={`h-20 border-2 border-dashed rounded-lg flex items-center justify-center transition-all duration-200 ${
+              isDragOver
+                ? 'border-blue-400 bg-blue-50 text-blue-600'
+                : 'border-gray-300 text-gray-400'
+            }`}
+            onDragOver={onColumnDragOver}
+            onDragLeave={onColumnDragLeave}
+            onDrop={handleColumnDrop}
+          >
+            <div className="text-center">
+              <div className="text-2xl mb-1">📝</div>
+              <p className="text-xs">
+                {isDragOver ? 'Отпустите здесь' : 'Перетащите задачу сюда'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Кнопка добавления задачи */}
+        {canManage && tasks.length > 0 && (
+          <button
+            onClick={onCreateTask}
+            className="w-full p-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors flex items-center justify-center space-x-2"
+          >
+            <Plus size={16} />
+            <span className="text-sm">Добавить задачу</span>
+          </button>
         )}
       </div>
-    </div>);
 
+      {/* Закрытие меню при клике вне его */}
+      {showMenu && (
+        <div
+          className="fixed inset-0 z-5"
+          onClick={() => setShowMenu(false)}
+        />
+      )}
+    </div>
+  );
 };
 
-// Мемоизированный экспорт для оптимизации производительности
-export const KanbanColumn = memo(KanbanColumnComponent, (prevProps, nextProps) => {
-  // Сравниваем только необходимые свойства
-  return (
-    prevProps.column.id === nextProps.column.id &&
-    prevProps.column.name === nextProps.column.name &&
-    prevProps.tasks.length === nextProps.tasks.length &&
-    prevProps.tasks.every((task, index) => 
-      task.id === nextProps.tasks[index]?.id &&
-      task.title === nextProps.tasks[index]?.title &&
-      task.status === nextProps.tasks[index]?.status
-    ) &&
-    prevProps.onAddTask === nextProps.onAddTask &&
-    prevProps.onTaskClick === nextProps.onTaskClick &&
-    prevProps.onViewCompleted === nextProps.onViewCompleted
-  );
-});
+export default KanbanColumn;

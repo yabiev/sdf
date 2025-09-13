@@ -94,7 +94,7 @@ export interface IBoardService {
   // Специфичные операции
   reorderBoards(projectId: ProjectId, boardIds: BoardId[], userId: UserId): Promise<OperationResult<boolean>>;
   duplicateBoard(id: BoardId, newName: string, userId: UserId): Promise<OperationResult<Board>>;
-  getBoardStatistics(id: BoardId, userId: UserId): Promise<OperationResult<any>>;
+  getBoardStatistics(id: BoardId, userId: UserId): Promise<OperationResult<Record<string, unknown>>>;
   
   // Операции с правами доступа
   getUserPermissions(boardId: BoardId, userId: UserId): Promise<OperationResult<BoardPermissions>>;

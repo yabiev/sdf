@@ -11,7 +11,7 @@ export type ProjectId = string;
 export type UserId = string;
 
 // Статусы и приоритеты
-export type TaskStatus = 'todo' | 'in-progress' | 'review' | 'done' | 'archived';
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'blocked';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type BoardVisibility = 'private' | 'team' | 'public';
 
@@ -108,7 +108,7 @@ export interface TaskMetadata {
   epicId?: string;
   sprintId?: string;
   labels: string[];
-  customFields: Record<string, any>;
+  customFields: Record<string, unknown>;
 }
 
 export interface Task extends AuditableEntity {
@@ -179,7 +179,7 @@ export interface CreateTaskDto {
   deadline?: Date;
   estimatedHours?: number;
   labels?: string[];
-  customFields?: Record<string, any>;
+  customFields?: Record<string, unknown>;
 }
 
 export interface UpdateTaskDto {
@@ -193,17 +193,17 @@ export interface UpdateTaskDto {
   estimatedHours?: number;
   actualHours?: number;
   labels?: string[];
-  customFields?: Record<string, any>;
+  customFields?: Record<string, unknown>;
   position?: number;
 }
 
 // Интерфейсы для фильтрации и поиска
 export interface BoardFilters {
-  projectId?: ProjectId;
+  projectIds?: string[];
   visibility?: BoardVisibility;
-  createdBy?: UserId;
+  createdBy?: string;
   isArchived?: boolean;
-  search?: string;
+  query?: string;
 }
 
 export interface TaskFilters {
@@ -256,7 +256,7 @@ export interface MoveTaskOperation {
 export interface BulkTaskOperation {
   taskIds: TaskId[];
   operation: 'archive' | 'delete' | 'assign' | 'move' | 'update_priority';
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
 }
 
 // Интерфейсы для событий
@@ -266,7 +266,7 @@ export interface BoardEvent {
   boardId: BoardId;
   userId: UserId;
   timestamp: Date;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 export interface TaskEvent {
@@ -276,7 +276,7 @@ export interface TaskEvent {
   boardId: BoardId;
   userId: UserId;
   timestamp: Date;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 // Интерфейсы для валидации
@@ -292,14 +292,14 @@ export interface ValidationResult {
 }
 
 // Интерфейсы для результатов операций
-export interface OperationResult<T = any> {
+export interface OperationResult<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
   errors?: ValidationError[];
 }
 
-export interface ServiceResponse<T = any> extends OperationResult<T> {
+export interface ServiceResponse<T = unknown> extends OperationResult<T> {
   statusCode?: number;
   message?: string;
 }

@@ -34,6 +34,7 @@ export interface IColumnRepository {
   updatePositions(updates: Array<{ id: ColumnId; position: number }>): Promise<boolean>;
   getMaxPosition(boardId: BoardId): Promise<number>;
   existsByName(name: string, boardId: BoardId, excludeId?: ColumnId): Promise<boolean>;
+  existsByTitle(title: string, boardId: BoardId, excludeId?: ColumnId): Promise<boolean>;
   countByBoard(boardId: BoardId): Promise<number>;
   getColumnWithTasks(id: ColumnId): Promise<(Column & { tasks: Task[] }) | null>;
 }
@@ -69,10 +70,10 @@ export interface IColumnWipService {
  */
 export interface IColumnAutomationService {
   executeAutoMoveRules(columnId: ColumnId, taskId: string): Promise<OperationResult>;
-  addAutoMoveRule(columnId: ColumnId, rule: any, createdBy: UserId): Promise<OperationResult>;
+  addAutoMoveRule(columnId: ColumnId, rule: Record<string, unknown>, createdBy: UserId): Promise<OperationResult>;
   removeAutoMoveRule(columnId: ColumnId, ruleId: string, removedBy: UserId): Promise<OperationResult>;
-  getColumnRules(columnId: ColumnId): Promise<OperationResult<any[]>>;
-  validateRule(rule: any): Promise<OperationResult>;
+  getColumnRules(columnId: ColumnId): Promise<OperationResult<Record<string, unknown>[]>>;
+  validateRule(rule: Record<string, unknown>): Promise<OperationResult>;
   executeRulesForTask(taskId: string): Promise<OperationResult>;
 }
 
@@ -100,13 +101,13 @@ export interface IColumnService {
   checkWipLimit(columnId: ColumnId): Promise<OperationResult<{ isExceeded: boolean; current: number; limit: number }>>;
   
   // Операции с автоматизацией
-  addAutoMoveRule(columnId: ColumnId, rule: any, userId: UserId): Promise<OperationResult>;
+  addAutoMoveRule(columnId: ColumnId, rule: Record<string, unknown>, userId: UserId): Promise<OperationResult>;
   removeAutoMoveRule(columnId: ColumnId, ruleId: string, userId: UserId): Promise<OperationResult>;
-  getColumnRules(columnId: ColumnId, userId: UserId): Promise<OperationResult<any[]>>;
+  getColumnRules(columnId: ColumnId, userId: UserId): Promise<OperationResult<Record<string, unknown>[]>>;
   
   // Специальные операции
   duplicateColumn(columnId: ColumnId, newName: string, userId: UserId): Promise<OperationResult<Column>>;
-  getColumnStatistics(columnId: ColumnId, userId: UserId): Promise<OperationResult<any>>;
+  getColumnStatistics(columnId: ColumnId, userId: UserId): Promise<OperationResult<Record<string, unknown>>>;
   getColumnWithTasks(columnId: ColumnId, userId: UserId): Promise<OperationResult<Column & { tasks: Task[] }>>;
   
   // Операции с шаблонами
@@ -144,10 +145,10 @@ export interface IColumnCacheService {
  * Отвечает только за шаблоны (Single Responsibility)
  */
 export interface IColumnTemplateService {
-  getTemplates(userId: UserId): Promise<OperationResult<any[]>>;
-  getTemplate(templateId: string): Promise<OperationResult<any>>;
-  createTemplate(name: string, columnData: Partial<Column>, userId: UserId): Promise<OperationResult<any>>;
-  updateTemplate(templateId: string, data: any, userId: UserId): Promise<OperationResult<any>>;
+  getTemplates(userId: UserId): Promise<OperationResult<Record<string, unknown>[]>>;
+  getTemplate(templateId: string): Promise<OperationResult<Record<string, unknown>>>;
+  createTemplate(name: string, columnData: Partial<Column>, userId: UserId): Promise<OperationResult<Record<string, unknown>>>;
+  updateTemplate(templateId: string, data: Record<string, unknown>, userId: UserId): Promise<OperationResult<Record<string, unknown>>>;
   deleteTemplate(templateId: string, userId: UserId): Promise<OperationResult<boolean>>;
   applyTemplate(templateId: string, boardId: BoardId, userId: UserId): Promise<OperationResult<Column[]>>;
 }
@@ -162,7 +163,7 @@ export interface IColumnEventService {
   emitColumnDeleted(columnId: ColumnId, boardId: BoardId, userId: UserId): Promise<void>;
   emitColumnReordered(boardId: BoardId, columnIds: ColumnId[], userId: UserId): Promise<void>;
   emitWipLimitChanged(columnId: ColumnId, oldLimit: number | undefined, newLimit: number | undefined, userId: UserId): Promise<void>;
-  getColumnEvents(columnId: ColumnId, limit?: number): Promise<any[]>;
+  getColumnEvents(columnId: ColumnId, limit?: number): Promise<Record<string, unknown>[]>;
 }
 
 /**
@@ -170,10 +171,10 @@ export interface IColumnEventService {
  * Отвечает только за аналитику (Single Responsibility)
  */
 export interface IColumnAnalyticsService {
-  getColumnMetrics(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
-  getBoardColumnMetrics(boardId: BoardId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
-  getColumnThroughput(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
-  getColumnCycleTime(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
-  getColumnWipTrends(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
-  generateColumnReport(columnId: ColumnId, reportType: string, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<any>>;
+  getColumnMetrics(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<Record<string, unknown>>>;
+  getBoardColumnMetrics(boardId: BoardId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<Record<string, unknown>>>;
+  getColumnThroughput(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<Record<string, unknown>>>;
+  getColumnCycleTime(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<Record<string, unknown>>>;
+  getColumnWipTrends(columnId: ColumnId, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<Record<string, unknown>>>;
+  generateColumnReport(columnId: ColumnId, reportType: string, dateFrom?: Date, dateTo?: Date): Promise<OperationResult<Record<string, unknown>>>;
 }

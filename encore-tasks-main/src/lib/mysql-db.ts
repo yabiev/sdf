@@ -604,7 +604,7 @@ export class MySQLDatabase {
     
     const query = `
       INSERT INTO columns (
-        id, name, board_id, position, color, task_limit, created_at, updated_at
+        id, title, board_id, position, color, task_limit, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
     

@@ -37,14 +37,14 @@ export function UserProfile({ isOpen, onClose, userId }: UserProfileProps) {
 
   // Calculate user statistics
   const userTasks = state.tasks.filter(
-    (task) => task.assignees?.some(a => a.id === user.id) || task.assignee?.id === user.id
+    (task) => task.assignees?.some(a => a.id === user.id)
   );
   
   const completedTasks = userTasks.filter((task) => task.status === "done");
-  const inProgressTasks = userTasks.filter((task) => task.status === "in-progress");
+  const inProgressTasks = userTasks.filter((task) => task.status === "in_progress");
   const overdueTasks = userTasks.filter((task) => {
-    if (!task.deadline) return false;
-    const deadline = new Date(task.deadline);
+    if (!task.due_date) return false;
+    const deadline = new Date(task.due_date);
     const now = new Date();
     return deadline < now && task.status !== "done";
   });
@@ -61,8 +61,8 @@ export function UserProfile({ isOpen, onClose, userId }: UserProfileProps) {
       const monthTasks = userTasks.filter(task => {
         if (task.status !== 'done') return false;
         
-        // Используем completedAt если есть, иначе updatedAt для выполненных задач
-        const completedDate = task.completedAt ? new Date(task.completedAt) : new Date(task.updatedAt);
+        // Используем updated_at для выполненных задач
+        const completedDate = new Date(task.updated_at);
         
         return completedDate.getMonth() === date.getMonth() && 
                completedDate.getFullYear() === date.getFullYear();
@@ -101,8 +101,8 @@ export function UserProfile({ isOpen, onClose, userId }: UserProfileProps) {
     const communicationScore = Math.min(100, (totalComments / Math.max(1, totalTasks)) * 20);
     
     // Calculate leadership based on role and project management
-    const userProjects = state.projects.filter(project => 
-      project.members.some(member => member.id === user.id && (member.role === 'admin' || member.role === 'manager'))
+    const userProjects = state.projects.filter(project =>
+      project.members?.some(member => member.userId === user.id && (member.role === 'admin' || member.role === 'owner'))
     );
     const leadershipBase = user.role === 'admin' ? 80 : user.role === 'manager' ? 60 : 40;
     const leadershipBonus = Math.min(20, userProjects.length * 5);
@@ -181,7 +181,7 @@ export function UserProfile({ isOpen, onClose, userId }: UserProfileProps) {
                   </div>
                   <div className="flex items-center gap-3">
                     <Calendar className="w-4 h-4 text-gray-400" />
-                    <span className="text-gray-300">Присоединился {formatDate(user.createdAt || new Date().toISOString())}</span>
+                    <span className="text-gray-300">Присоединился {formatDate(new Date(user.created_at || new Date().toISOString()))}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <Target className="w-4 h-4 text-gray-400" />

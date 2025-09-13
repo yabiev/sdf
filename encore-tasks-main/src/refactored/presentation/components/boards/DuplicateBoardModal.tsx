@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Board, CreateBoardData } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select, Checkbox } from '../../common';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { Input } from '../common/Input';
+import { Textarea } from '../common/Textarea';
+import { Select } from '../common/Select';
+import { Checkbox } from '../common/Checkbox';
 import { BoardValidator } from '../../../business/validators';
 import { useProjects } from '../../hooks/useProjects';
 
@@ -11,7 +16,7 @@ interface DuplicateBoardModalProps {
   onSubmit: (data: CreateBoardData & { duplicateOptions: DuplicateOptions }) => Promise<void>;
 }
 
-interface DuplicateOptions {
+export interface DuplicateOptions {
   includeColumns: boolean;
   includeTasks: boolean;
   includeTaskAssignments: boolean;
@@ -85,14 +90,14 @@ const DuplicateBoardModal: React.FC<DuplicateBoardModalProps> = ({
     // Validate name
     const nameValidation = BoardValidator.validateName(formData.name);
     if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.errors[0];
+      newErrors.name = nameValidation.errors[0].message;
     }
 
     // Validate description (optional)
     if (formData.description) {
       const descValidation = BoardValidator.validateDescription(formData.description);
       if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
+        newErrors.description = descValidation.errors[0].message;
       }
     }
 
@@ -102,7 +107,7 @@ const DuplicateBoardModal: React.FC<DuplicateBoardModalProps> = ({
     } else {
       const projectValidation = BoardValidator.validateProjectId(formData.projectId);
       if (!projectValidation.isValid) {
-        newErrors.projectId = projectValidation.errors[0];
+        newErrors.projectId = projectValidation.errors[0].message;
       }
     }
 

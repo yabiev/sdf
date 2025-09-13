@@ -204,9 +204,9 @@ export function CalendarPage() {
 
   const getTasksForDate = (date: Date) => {
     return state.tasks.filter((task) => {
-      if (!task.deadline) return false;
-      const taskDate = new Date(task.deadline);
-      const taskAssignees = task.assignees || (task.assignee ? [task.assignee] : []);
+      if (!task.due_date) return false;
+      const taskDate = new Date(task.due_date);
+      const taskAssignees = task.assignees || [];
       return (
         taskDate.toDateString() === date.toDateString() && (
         !selectedUser || taskAssignees.some(a => a.id === selectedUser))
@@ -233,9 +233,9 @@ export function CalendarPage() {
 
   const upcomingTasks = state.tasks
   .filter((task) => {
-    if (!task.deadline) return false;
-    const days = getDaysUntilDeadline(task.deadline);
-    const taskAssignees = task.assignees || (task.assignee ? [task.assignee] : []);
+    if (!task.due_date) return false;
+    const days = getDaysUntilDeadline(new Date(task.due_date));
+    const taskAssignees = task.assignees || [];
     return (
       days >= 0 &&
       days <= 7 &&
@@ -244,8 +244,8 @@ export function CalendarPage() {
     );
   })
   .sort((a, b) => {
-    if (!a.deadline || !b.deadline) return 0;
-    return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+    if (!a.due_date || !b.due_date) return 0;
+    return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
   });
 
   const handleDayClick = (date: Date) => {
@@ -490,7 +490,7 @@ export function CalendarPage() {
                         {task.title}
                       </p>
                       {(() => {
-                        const assignees = task.assignees || (task.assignee ? [task.assignee] : []);
+                        const assignees = task.assignees || [];
                         if (assignees.length === 0) return null;
                         return (
                           <p
@@ -529,8 +529,8 @@ export function CalendarPage() {
             </h3>
             <div className="space-y-3" data-oid="st_lod7">
               {upcomingTasks.slice(0, 5).map((task) => {
-                const daysUntil = task.deadline ?
-                getDaysUntilDeadline(task.deadline) :
+                const daysUntil = task.due_date ?
+                getDaysUntilDeadline(new Date(task.due_date)) :
                 0;
                 return (
                   <div
@@ -562,7 +562,7 @@ export function CalendarPage() {
                           data-oid=".asnt4y">
 
                           {(() => {
-                            const assignees = task.assignees || (task.assignee ? [task.assignee] : []);
+                            const assignees = task.assignees || [];
                             if (assignees.length === 0) return null;
                             return (
                               <p

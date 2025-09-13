@@ -1,12 +1,8 @@
 // Refactored Database Adapter
 // This adapter provides a clean, consistent interface for database operations
 
+import { Pool, PoolClient } from 'pg';
 import { IDatabaseAdapter } from '../../business/interfaces';
-import {
-  User, Project, Board, Column, Task, Session,
-  TaskDependency, Comment, Attachment, TimeEntry, TaskAction
-} from '../types';
-import { Pool } from 'pg';
 
 export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
   private pool: Pool;
@@ -84,7 +80,41 @@ export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
     this.transactionActive = false;
   }
 
-  async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  async execute(sql: string, params: unknown[] = []): Promise<{ affectedRows: number; insertId?: string }> {
+    try {
+      const client = await this.pool.connect();
+      const result = await client.query(sql, params);
+      client.release();
+      return {
+        affectedRows: result.rowCount || 0,
+        insertId: result.rows[0]?.id
+      };
+    } catch (error) {
+      throw new Error(`Execute failed: ${error}`);
+    }
+  }
+
+  async transaction<T>(callback: (adapter: IDatabaseAdapter) => Promise<T>): Promise<T> {
+    await this.beginTransaction();
+    try {
+      const result = await callback(this);
+      await this.commit();
+      return result;
+    } catch (error) {
+      await this.rollback();
+      throw error;
+    }
+  }
+
+  async commit(): Promise<void> {
+    await this.commitTransaction();
+  }
+
+  async rollback(): Promise<void> {
+    await this.rollbackTransaction();
+  }
+
+  async query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
     try {
       const client = await this.pool.connect();
       const result = await client.query(sql, params);
@@ -95,7 +125,7 @@ export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
     }
   }
 
-  async queryOne<T = any>(sql: string, params: any[] = []): Promise<T | null> {
+  async queryOne<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | null> {
     try {
       const client = await this.pool.connect();
       const result = await client.query(sql, params);
@@ -106,7 +136,7 @@ export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
     }
   }
 
-  async insert<T = any>(table: string, data: Record<string, any>): Promise<T> {
+  async insert<T = Record<string, unknown>>(table: string, data: Record<string, unknown>): Promise<T> {
     const columns = Object.keys(data);
     const values = Object.values(data);
     const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
@@ -123,7 +153,7 @@ export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
     }
   }
 
-  async update<T = any>(table: string, id: string, data: Record<string, any>): Promise<T> {
+  async update<T = Record<string, unknown>>(table: string, id: string, data: Record<string, unknown>): Promise<T> {
     const columns = Object.keys(data);
     const values = Object.values(data);
     const setClause = columns.map((col, index) => `${col} = $${index + 1}`).join(', ');
@@ -474,11 +504,11 @@ export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
   }
 
   // Helper methods for data transformation
-  transformToEntity<T>(row: any, entityType: string): T {
+  transformToEntity<T>(row: Record<string, unknown>, entityType: string): T {
     if (!row) return null as T;
 
     // Convert snake_case to camelCase and parse JSON fields
-    const transformed: any = {};
+    const transformed: Record<string, unknown> = {};
     
     for (const [key, value] of Object.entries(row)) {
       const camelKey = this.toCamelCase(key);
@@ -504,8 +534,8 @@ export class RefactoredDatabaseAdapter implements IDatabaseAdapter {
     return transformed as T;
   }
 
-  transformFromEntity(entity: any, entityType: string): Record<string, any> {
-    const transformed: any = {};
+  transformFromEntity(entity: Record<string, unknown>, entityType: string): Record<string, unknown> {
+    const transformed: Record<string, unknown> = {};
     
     for (const [key, value] of Object.entries(entity)) {
       const snakeKey = this.toSnakeCase(key);

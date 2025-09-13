@@ -9,12 +9,33 @@ export * from './hooks/useProjects';
 export * from './hooks/useBoards';
 export * from './hooks/useTasks';
 export * from './hooks/useDebounce';
-export * from './hooks/useAuth';
 export * from './hooks/useColumns';
+export * from './hooks/useUsers';
 
 // Export contexts
-export * from './contexts/AuthContext';
-export * from './contexts/ThemeContext';
+// Note: Context exports removed as contexts directory doesn't exist
 
 // Re-export all types
-export * from '../data/types';
+export type {
+  Board,
+  CreateBoardData,
+  UpdateBoardData,
+  BoardFilters as BoardFiltersType,
+  BoardSortField,
+  SortOrder,
+  Task,
+  CreateTaskData,
+  UpdateTaskData,
+  TaskFilters,
+  TaskSortField,
+  Column,
+  Project,
+  CreateProjectData,
+  UpdateProjectData,
+  User,
+  PaginationParams,
+  PaginatedResponse,
+  SearchFilters,
+  SortOptions,
+  PaginationOptions
+} from '../data/types';

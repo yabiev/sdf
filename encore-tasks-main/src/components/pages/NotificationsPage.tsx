@@ -51,7 +51,7 @@ export function NotificationsPage() {
       message: `Пользователь ${user.name} (${user.email}) ожидает подтверждения`,
       type: "info" as const,
       isRead: false,
-      createdAt: user.createdAt.toISOString(),
+      createdAt: new Date(user.created_at).toISOString(),
       userId: user.id
     })) || [];
   }, [state.pendingUserNotifications, state.currentUser?.role]);
@@ -88,8 +88,8 @@ export function NotificationsPage() {
       // Navigate to the task
       const task = state.tasks.find((t) => t.id === notification.taskId);
       if (task) {
-        const project = state.projects.find((p) => p.id === task.projectId);
-        const board = state.boards.find((b) => b.id === task.boardId);
+        const project = state.projects.find((p) => p.id === task.project_id);
+        const board = state.boards.find((b) => b.id === task.board_id);
 
         if (project && board) {
           // This would trigger navigation to boards - implement as needed

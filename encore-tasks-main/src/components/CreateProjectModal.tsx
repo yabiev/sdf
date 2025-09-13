@@ -1,15 +1,35 @@
 "use client";
 
-import React, { useState } from "react";
-import { Project, User } from "@/types";
-import { useApp } from "@/contexts/AppContext";
-import { X, Save, Users, MessageCircle } from "lucide-react";
-import { ColorPicker } from "./ColorPicker";
+import React, { useState, useContext, useEffect } from 'react';
+import { X, Users, Hash, MessageSquare, Plus, Trash2, AlertCircle, Save, MessageCircle } from 'lucide-react';
+import { useApp } from '../contexts/AppContext';
+import { User, CreateProjectDto, ProjectWithStats, Project } from '../types/core.types';
+import { toast } from 'sonner';
+import { ColorPicker } from './ColorPicker';
+
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (project: Omit<Project, "id" | "createdAt">) => void;
+  onSave?: (project: any) => Promise<boolean> | boolean;
+}
+
+interface ProjectFormData {
+  name: string;
+  color: string;
+  members: User[];
+  telegramChatId?: string;
+  telegramTopicId?: string;
+}
+
+interface ValidationErrors {
+  name?: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  telegramChatId?: string;
+  telegramTopicId?: string;
+  members?: string;
 }
 
 
@@ -20,62 +40,162 @@ export function CreateProjectModal({
   onClose,
   onSave
 }: CreateProjectModalProps) {
-  const { state } = useApp();
+  const { state, createProject } = useApp();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
-    description: "",
     color: "#6366f1",
     memberIds: [] as string[],
     telegramChatId: "",
     telegramTopicId: ""
   });
+  const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({});
+
+  // Сброс формы при открытии модального окна
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        name: "",
+        color: "#6366f1",
+        memberIds: [],
+        telegramChatId: "",
+        telegramTopicId: ""
+      });
+      setValidationErrors({});
+      setError(null);
+    }
+  }, [isOpen]);
+
+  // Функция валидации данных
+  const validateFormData = (data: typeof formData): {[key: string]: string} => {
+    const errors: {[key: string]: string} = {};
+    
+    // Валидация названия
+    if (data.name.trim() && data.name.trim().length < 2) {
+      errors.name = "Название проекта должно содержать минимум 2 символа";
+    }
+    if (data.name.trim().length > 100) {
+      errors.name = "Название проекта не должно превышать 100 символов";
+    }
+    
+
+    
+    // Валидация Telegram ID
+    if (data.telegramChatId && !/^-?\d+$/.test(data.telegramChatId)) {
+      errors.telegramChatId = "ID чата должен содержать только цифры";
+    }
+    
+    if (data.telegramTopicId && !/^\d+$/.test(data.telegramTopicId)) {
+      errors.telegramTopicId = "ID топика должен содержать только цифры";
+    }
+    
+    console.log('Результат валидации:', errors);
+    return errors;
+  };
 
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    if (!formData.name.trim() || !state.currentUser || isSubmitting) return;
+    if (!state.currentUser) return;
 
+    console.log('=== НАЧАЛО СОЗДАНИЯ ПРОЕКТА ===');
+    console.log('Исходные данные формы:', formData);
+    
     setIsSubmitting(true);
     setError(null);
+    setValidationErrors({});
+
     try {
+      // Используем название из формы как есть, автогенерация будет в AppContext если нужно
+      const projectName = formData.name.trim();
+      console.log('Название проекта из формы:', projectName);
+      
+      // Создаем данные для валидации
+      const dataToValidate = {
+        ...formData,
+        name: projectName
+      };
+      
+      // Валидация данных
+      const errors = validateFormData(dataToValidate);
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+        console.log('Ошибки валидации:', errors);
+        return;
+      }
+
+      // Always include current user as member
       const selectedMembers = state.users.filter(
         (user) =>
         formData.memberIds.includes(user.id) ||
         user.id === state.currentUser?.id
       );
 
-      // Always include current user as member
       if (!selectedMembers.find((m) => m.id === state.currentUser?.id)) {
         selectedMembers.push(state.currentUser);
       }
 
-      const newProject: Omit<Project, "id" | "createdAt"> = {
-        name: formData.name,
-        description: formData.description || undefined,
+      const newProject = {
+        name: projectName,
         color: formData.color,
-        members: selectedMembers,
-        createdBy: state.currentUser.id,
-        telegramChatId: formData.telegramChatId || undefined,
-        telegramTopicId: formData.telegramTopicId || undefined
+        members: selectedMembers.map((member) => ({
+          id: member.id,
+          userId: member.id,
+          name: member.name,
+          role: member.id === state.currentUser?.id ? "owner" : "member",
+          joinedAt: new Date().toISOString()
+        })),
+        created_by: state.currentUser.id,
+        telegramChatId: formData.telegramChatId.trim() || undefined,
+        telegramTopicId: formData.telegramTopicId.trim() || undefined
       };
 
-      await onSave(newProject);
-
-      // Reset form only on success
-      setFormData({
-        name: "",
-        description: "",
-        color: "#6366f1",
-        memberIds: [],
-        telegramChatId: "",
-        telegramTopicId: ""
-      });
-      setError(null);
+      console.log('Финальные данные проекта для создания:', newProject);
+      console.log('Вызов createProject...');
+      try {
+        let success = false;
+        
+        if (onProjectCreated) {
+          // Use onProjectCreated callback if provided (from Sidebar)
+          success = await onProjectCreated(newProject);
+        } else if (onSave) {
+          // Use onSave callback if provided (legacy support)
+          success = await onSave(newProject);
+        } else {
+          // Use default createProject logic
+          const createdProject = await createProject(newProject);
+          console.log('Результат createProject:', createdProject);
+          
+          if (createdProject) {
+            success = true;
+          }
+        }
+        
+        if (success) {
+          console.log('=== ПРОЕКТ СОЗДАН УСПЕШНО ===');
+          
+          // Reset form and close modal on success
+          setFormData({
+            name: "",
+            color: "#6366f1",
+            memberIds: [],
+            telegramChatId: "",
+            telegramTopicId: ""
+          });
+          setValidationErrors({});
+          onClose();
+        } else {
+          console.log('=== ОШИБКА: ПРОЕКТ НЕ СОЗДАН ===');
+          setError('Не удалось создать проект. Попробуйте еще раз.');
+        }
+      } catch (error) {
+        console.log('=== ИСКЛЮЧЕНИЕ ПРИ ВЫЗОВЕ createProject ===', error);
+        setError('Ошибка при создании проекта: ' + (error as Error).message);
+      }
     } catch (error) {
-      console.error('Error creating project:', error);
-      setError(error instanceof Error ? error.message : 'Ошибка сервера. Попробуйте позже.');
+      console.error('=== ОШИБКА СОЗДАНИЯ ПРОЕКТА ===', error);
+      setError(error instanceof Error ? error.message : 'Произошла ошибка при создании проекта');
     } finally {
       setIsSubmitting(false);
     }
@@ -131,32 +251,17 @@ export function CreateProjectModal({
               onChange={(e) =>
               setFormData({ ...formData, name: e.target.value })
               }
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500"
+              className={`w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 ${validationErrors.name ? 'border-red-500' : ''}`}
               placeholder="Введите название проекта"
               autoFocus
               data-oid="q-4h2qo" />
+            {validationErrors.name && (
+              <p className="text-red-500 text-sm mt-1">{validationErrors.name}</p>
+            )}
 
           </div>
 
-          {/* Description */}
-          <div data-oid="18vkhh9">
-            <label
-              className="block text-sm font-medium text-gray-300 mb-2"
-              data-oid="_wa:u0d">
 
-              Описание
-            </label>
-            <textarea
-              value={formData.description}
-              onChange={(e) =>
-              setFormData({ ...formData, description: e.target.value })
-              }
-              rows={3}
-              className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 resize-none"
-              placeholder="Добавьте описание проекта"
-              data-oid="7bj9.uk" />
-
-          </div>
 
           {/* Color */}
           <div>
@@ -168,6 +273,8 @@ export function CreateProjectModal({
               onColorSelect={(color) => setFormData({ ...formData, color })}
             />
           </div>
+
+
 
           {/* Members */}
           <div data-oid="yhaanv:">
@@ -182,13 +289,13 @@ export function CreateProjectModal({
               className="space-y-2 max-h-32 overflow-y-auto"
               data-oid="-3.9tsc">
 
-              {state.users.
-              filter((user) => user.id !== state.currentUser?.id).
-              map((user) =>
-              <label
-                key={user.id}
-                className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg cursor-pointer"
-                data-oid="n4c2:xw">
+              {state.users
+                .filter((user) => user.id !== state.currentUser?.id)
+                .map((user) => (
+                  <label
+                    key={user.id}
+                    className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg cursor-pointer"
+                    data-oid="n4c2:xw">
 
                     <input
                   type="checkbox"
@@ -226,7 +333,7 @@ export function CreateProjectModal({
                       </span>
                     </div>
                   </label>
-              )}
+                ))}
             </div>
           </div>
 
@@ -256,9 +363,12 @@ export function CreateProjectModal({
                 onChange={(e) =>
                 setFormData({ ...formData, telegramChatId: e.target.value })
                 }
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 text-sm"
+                className={`w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 text-sm ${validationErrors.telegramChatId ? 'border-red-500' : ''}`}
                 placeholder="-1001234567890"
                 data-oid="_mxgof2" />
+              {validationErrors.telegramChatId && (
+                <p className="text-red-500 text-sm mt-1">{validationErrors.telegramChatId}</p>
+              )}
 
             </div>
 
@@ -275,9 +385,12 @@ export function CreateProjectModal({
                 onChange={(e) =>
                 setFormData({ ...formData, telegramTopicId: e.target.value })
                 }
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 text-sm"
+                className={`w-full px-3 py-2 bg-white/5 border border-white/10 rounded text-white placeholder-gray-400 focus:outline-none focus:border-primary-500 text-sm ${validationErrors.telegramTopicId ? 'border-red-500' : ''}`}
                 placeholder="123"
                 data-oid="7gvv45b" />
+              {validationErrors.telegramTopicId && (
+                <p className="text-red-500 text-sm mt-1">{validationErrors.telegramTopicId}</p>
+              )}
 
             </div>
           </div>
@@ -304,12 +417,17 @@ export function CreateProjectModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={!formData.name.trim() || isSubmitting}
+            disabled={isSubmitting}
             className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            data-oid="ny:l5cm">
+            data-oid="ny:l5cm"
+            style={{ pointerEvents: isSubmitting ? 'none' : 'auto' }}>
 
-            <Save className="w-4 h-4" data-oid="h9j_v5c" />
-            {isSubmitting ? 'Создание...' : 'Создать проект'}
+            {isSubmitting ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" data-oid="h9j_v5c" />
+            )}
+            {isSubmitting ? 'Создание...' : 'Создать'}
           </button>
         </div>
       </div>

@@ -13,20 +13,22 @@ import {
   CreateTaskDto,
   UpdateTaskDto,
   TaskFilters,
-  SortOptions,
+  SearchFilters,
   PaginationOptions,
-  PaginatedResponse,
   TaskStatus,
-  TaskPriority
-} from '../../types/board.types';
-
+  TaskPriority,
+  SortOptions,
+  PaginatedResponse
+} from '../../refactored/data/types';
 import { ITaskRepository } from '../interfaces/task.service.interface';
+import { DatabaseAdapter } from '../../refactored/data/adapters/database-adapter';
+import { randomUUID } from 'crypto';
 
 /**
  * Реализация репозитория задач для работы с базой данных
  */
 export class TaskRepository implements ITaskRepository {
-  constructor(private readonly databaseAdapter: any) {}
+  constructor(private readonly databaseAdapter: DatabaseAdapter) {}
 
   async findById(id: TaskId): Promise<Task | null> {
     try {
@@ -70,7 +72,7 @@ export class TaskRepository implements ITaskRepository {
     }
   }
 
-  async findByBoardId(boardId: BoardId, filters?: TaskFilters): Promise<Task[]> {
+  async findByBoardId(boardId: BoardId, filters?: SearchFilters): Promise<Task[]> {
     try {
       let query = `
         SELECT 
@@ -99,7 +101,7 @@ export class TaskRepository implements ITaskRepository {
         WHERE board_id = ?
       `;
       
-      const params: any[] = [boardId];
+      const params: unknown[] = [boardId];
       
       // Применяем фильтры
       if (filters) {
@@ -108,19 +110,22 @@ export class TaskRepository implements ITaskRepository {
           params.push(filters.columnId);
         }
         
-        if (filters.status) {
-          query += ' AND status = ?';
-          params.push(filters.status);
+        if (filters.statuses && filters.statuses.length > 0) {
+          const placeholders = filters.statuses.map(() => '?').join(', ');
+          query += ` AND status IN (${placeholders})`;
+          params.push(...filters.statuses);
         }
         
-        if (filters.priority) {
-          query += ' AND priority = ?';
-          params.push(filters.priority);
+        if (filters.priorities && filters.priorities.length > 0) {
+          const placeholders = filters.priorities.map(() => '?').join(', ');
+          query += ` AND priority IN (${placeholders})`;
+          params.push(...filters.priorities);
         }
         
-        if (filters.assigneeId) {
-          query += ' AND assigned_to = ?';
-          params.push(filters.assigneeId);
+        if (filters.assigneeIds && filters.assigneeIds.length > 0) {
+          const placeholders = filters.assigneeIds.map(() => '?').join(', ');
+          query += ` AND assigned_to IN (${placeholders})`;
+          params.push(...filters.assigneeIds);
         }
         
         if (filters.createdBy) {
@@ -129,15 +134,15 @@ export class TaskRepository implements ITaskRepository {
         }
         
         if (filters.isArchived !== undefined) {
-          query += ` AND is_archived = $${paramIndex}`;
+          query += ' AND is_archived = ?';
           params.push(filters.isArchived);
         } else {
           query += ' AND is_archived = FALSE';
         }
         
-        if (filters.search) {
+        if (filters.query) {
           query += ' AND (title LIKE ? OR description LIKE ?)';
-          const searchTerm = `%${filters.search}%`;
+          const searchTerm = `%${filters.query}%`;
           params.push(searchTerm, searchTerm);
         }
         
@@ -164,14 +169,14 @@ export class TaskRepository implements ITaskRepository {
       
       const results = await this.databaseAdapter.query(query, params);
       
-      return results.map((row: any) => this.mapRowToTask(row));
+      return results.map((row: Record<string, unknown>) => this.mapRowToTask(row));
     } catch (error) {
       console.error('Error finding tasks by board:', error);
       throw new Error(`Failed to find tasks: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  async findByColumnId(columnId: ColumnId, filters?: TaskFilters): Promise<Task[]> {
+  async findByColumnId(columnId: ColumnId, filters?: SearchFilters): Promise<Task[]> {
     try {
       let query = `
         SELECT 
@@ -200,7 +205,7 @@ export class TaskRepository implements ITaskRepository {
         WHERE column_id = ?
       `;
       
-      const params: any[] = [columnId];
+      const params: unknown[] = [columnId];
       
       // Применяем фильтры
       if (filters) {
@@ -214,9 +219,10 @@ export class TaskRepository implements ITaskRepository {
           params.push(filters.priority);
         }
         
-        if (filters.assigneeId) {
-          query += ' AND assigned_to = ?';
-          params.push(filters.assigneeId);
+        if (filters.assigneeIds && filters.assigneeIds.length > 0) {
+          const placeholders = filters.assigneeIds.map(() => '?').join(', ');
+          query += ` AND assigned_to IN (${placeholders})`;
+          params.push(...filters.assigneeIds);
         }
         
         if (filters.isArchived !== undefined) {
@@ -226,9 +232,9 @@ export class TaskRepository implements ITaskRepository {
           query += ' AND is_archived = 0';
         }
         
-        if (filters.search) {
+        if (filters.query) {
           query += ' AND (title LIKE ? OR description LIKE ?)';
-          const searchTerm = `%${filters.search}%`;
+          const searchTerm = `%${filters.query}%`;
           params.push(searchTerm, searchTerm);
         }
       } else {
@@ -239,7 +245,7 @@ export class TaskRepository implements ITaskRepository {
       
       const results = await this.databaseAdapter.query(query, params);
       
-      return results.map((row: any) => this.mapRowToTask(row));
+      return results.map((row: Record<string, unknown>) => this.mapRowToTask(row));
     } catch (error) {
       console.error('Error finding tasks by column:', error);
       throw new Error(`Failed to find tasks: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -272,48 +278,52 @@ export class TaskRepository implements ITaskRepository {
           is_archived as isArchived,
           archived_at as archivedAt
         FROM tasks 
-        WHERE project_id = ?
+        WHERE project_id = $1
       `;
       
-      const params: any[] = [projectId];
+      const params: unknown[] = [projectId];
+      let paramIndex = 2;
       
       // Применяем фильтры
       if (filters) {
         if (filters.boardId) {
-          query += ' AND board_id = ?';
+          query += ` AND board_id = $${paramIndex++}`;
           params.push(filters.boardId);
         }
         
         if (filters.columnId) {
-          query += ' AND column_id = ?';
+          query += ` AND column_id = $${paramIndex++}`;
           params.push(filters.columnId);
         }
         
-        if (filters.status) {
-          query += ' AND status = ?';
-          params.push(filters.status);
+        if (filters.statuses && filters.statuses.length > 0) {
+          const placeholders = filters.statuses.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND status IN (${placeholders})`;
+          params.push(...filters.statuses);
         }
         
-        if (filters.priority) {
-          query += ' AND priority = ?';
-          params.push(filters.priority);
+        if (filters.priorities && filters.priorities.length > 0) {
+          const placeholders = filters.priorities.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND priority IN (${placeholders})`;
+          params.push(...filters.priorities);
         }
         
-        if (filters.assigneeId) {
-          query += ' AND assigned_to = ?';
-          params.push(filters.assigneeId);
+        if (filters.assigneeIds && filters.assigneeIds.length > 0) {
+          const placeholders = filters.assigneeIds.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND assigned_to IN (${placeholders})`;
+          params.push(...filters.assigneeIds);
         }
         
         if (filters.isArchived !== undefined) {
-          query += ' AND is_archived = ?';
+          query += ` AND is_archived = $${paramIndex++}`;
           params.push(filters.isArchived ? 1 : 0);
         } else {
           query += ' AND is_archived = 0';
         }
         
-        if (filters.search) {
-          query += ' AND (title LIKE ? OR description LIKE ?)';
-          const searchTerm = `%${filters.search}%`;
+        if (filters.query) {
+          query += ` AND (title LIKE $${paramIndex++} OR description LIKE $${paramIndex++})`;
+          const searchTerm = `%${filters.query}%`;
           params.push(searchTerm, searchTerm);
         }
       } else {
@@ -324,14 +334,14 @@ export class TaskRepository implements ITaskRepository {
       
       const results = await this.databaseAdapter.query(query, params);
       
-      return results.map((row: any) => this.mapRowToTask(row));
+      return results.map((row: Record<string, unknown>) => this.mapRowToTask(row));
     } catch (error) {
       console.error('Error finding tasks by project:', error);
       throw new Error(`Failed to find tasks: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  async findByAssigneeId(assigneeId: UserId, filters?: TaskFilters): Promise<Task[]> {
+  async findByAssigneeId(assigneeId: UserId, filters?: SearchFilters): Promise<Task[]> {
     try {
       let query = `
         SELECT 
@@ -357,35 +367,39 @@ export class TaskRepository implements ITaskRepository {
           is_archived as isArchived,
           archived_at as archivedAt
         FROM tasks 
-        WHERE assigned_to = ?
+        WHERE assigned_to = $1
       `;
       
-      const params: any[] = [assigneeId];
+      const params: unknown[] = [assigneeId];
+      let paramIndex = 2;
       
       // Применяем фильтры
       if (filters) {
-        if (filters.projectId) {
-          query += ' AND project_id = ?';
-          params.push(filters.projectId);
+        if (filters.projectIds && filters.projectIds.length > 0) {
+          const placeholders = filters.projectIds.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND project_id IN (${placeholders})`;
+          params.push(...filters.projectIds);
         }
         
         if (filters.boardId) {
-          query += ' AND board_id = ?';
+          query += ` AND board_id = $${paramIndex++}`;
           params.push(filters.boardId);
         }
         
-        if (filters.status) {
-          query += ' AND status = ?';
-          params.push(filters.status);
+        if (filters.statuses && filters.statuses.length > 0) {
+          const placeholders = filters.statuses.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND status IN (${placeholders})`;
+          params.push(...filters.statuses);
         }
         
-        if (filters.priority) {
-          query += ' AND priority = ?';
-          params.push(filters.priority);
+        if (filters.priorities && filters.priorities.length > 0) {
+          const placeholders = filters.priorities.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND priority IN (${placeholders})`;
+          params.push(...filters.priorities);
         }
         
         if (filters.isArchived !== undefined) {
-          query += ' AND is_archived = ?';
+          query += ` AND is_archived = $${paramIndex++}`;
           params.push(filters.isArchived ? 1 : 0);
         } else {
           query += ' AND is_archived = 0';
@@ -398,14 +412,14 @@ export class TaskRepository implements ITaskRepository {
       
       const results = await this.databaseAdapter.query(query, params);
       
-      return results.map((row: any) => this.mapRowToTask(row));
+      return results.map((row: Record<string, unknown>) => this.mapRowToTask(row));
     } catch (error) {
       console.error('Error finding tasks by assignee:', error);
       throw new Error(`Failed to find tasks: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  async findAll(filters?: TaskFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<PaginatedResponse<Task>> {
+  async findAll(filters?: SearchFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<PaginatedResponse<Task>> {
     try {
       let query = `
         SELECT 
@@ -434,71 +448,76 @@ export class TaskRepository implements ITaskRepository {
         WHERE 1=1
       `;
       
-      const params: any[] = [];
+      const params: unknown[] = [];
+      let paramIndex = 1;
       
       // Применяем фильтры
       if (filters) {
-        if (filters.projectId) {
-          query += ' AND project_id = ?';
-          params.push(filters.projectId);
+        if (filters.projectIds && filters.projectIds.length > 0) {
+          const placeholders = filters.projectIds.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND project_id IN (${placeholders})`;
+          params.push(...filters.projectIds);
         }
         
         if (filters.boardId) {
-          query += ' AND board_id = ?';
+          query += ` AND board_id = $${paramIndex++}`;
           params.push(filters.boardId);
         }
         
         if (filters.columnId) {
-          query += ' AND column_id = ?';
+          query += ` AND column_id = $${paramIndex++}`;
           params.push(filters.columnId);
         }
         
-        if (filters.status) {
-          query += ' AND status = ?';
-          params.push(filters.status);
+        if (filters.statuses && filters.statuses.length > 0) {
+          const placeholders = filters.statuses.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND status IN (${placeholders})`;
+          params.push(...filters.statuses);
         }
         
-        if (filters.priority) {
-          query += ' AND priority = ?';
-          params.push(filters.priority);
+        if (filters.priorities && filters.priorities.length > 0) {
+          const placeholders = filters.priorities.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND priority IN (${placeholders})`;
+          params.push(...filters.priorities);
         }
         
-        if (filters.assigneeId) {
-          query += ' AND assigned_to = ?';
-          params.push(filters.assigneeId);
+        if (filters.assigneeIds && filters.assigneeIds.length > 0) {
+          const placeholders = filters.assigneeIds.map(() => `$${paramIndex++}`).join(', ');
+          query += ` AND assigned_to IN (${placeholders})`;
+          params.push(...filters.assigneeIds);
         }
         
         if (filters.createdBy) {
-          query += ' AND created_by = ?';
+          query += ` AND created_by = $${paramIndex++}`;
           params.push(filters.createdBy);
         }
         
         if (filters.isArchived !== undefined) {
-          query += ' AND is_archived = ?';
+          query += ` AND is_archived = $${paramIndex++}`;
           params.push(filters.isArchived ? 1 : 0);
         } else {
           query += ' AND is_archived = 0';
         }
         
-        if (filters.search) {
-          query += ' AND (title LIKE ? OR description LIKE ?)';
-          const searchTerm = `%${filters.search}%`;
+        if (filters.query) {
+          query += ` AND (title LIKE $${paramIndex++} OR description LIKE $${paramIndex++})`;
+          const searchTerm = `%${filters.query}%`;
           params.push(searchTerm, searchTerm);
         }
         
         if (filters.tags && filters.tags.length > 0) {
-          const tagConditions = filters.tags.map(() => 'JSON_CONTAINS(tags, ?)');
+          const tagConditions = filters.tags.map(() => `JSON_CONTAINS(tags, $${paramIndex++})`);
           query += ` AND (${tagConditions.join(' OR ')})`;
           filters.tags.forEach(tag => params.push(JSON.stringify(tag)));
         }
         
         if (filters.deadlineBefore) {
-          query += ' AND deadline <= ?';
+          query += ` AND deadline <= $${paramIndex++}`;
           params.push(filters.deadlineBefore);
         }
         
         if (filters.deadlineAfter) {
-          query += ' AND deadline >= ?';
+          query += ` AND deadline >= $${paramIndex++}`;
           params.push(filters.deadlineAfter);
         }
       } else {
@@ -521,12 +540,12 @@ export class TaskRepository implements ITaskRepository {
       // Применяем пагинацию
       if (pagination) {
         const offset = (pagination.page - 1) * pagination.limit;
-        query += ' LIMIT ? OFFSET ?';
+        query += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
         params.push(pagination.limit, offset);
       }
       
       const results = await this.databaseAdapter.query(query, params);
-      const tasks = results.map((row: any) => this.mapRowToTask(row));
+      const tasks = results.map((row: Record<string, unknown>) => this.mapRowToTask(row));
       
       const totalPages = pagination ? Math.ceil(total / pagination.limit) : 1;
       const currentPage = pagination?.page || 1;
@@ -559,7 +578,7 @@ export class TaskRepository implements ITaskRepository {
           id, title, description, board_id, column_id, project_id, 
           status, priority, tags, position, estimated_hours, deadline,
           created_by, assigned_to, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       `;
       
       const params = [
@@ -598,30 +617,31 @@ export class TaskRepository implements ITaskRepository {
   async update(id: TaskId, taskData: UpdateTaskDto, updatedBy: UserId): Promise<Task | null> {
     try {
       const updateFields: string[] = [];
-      const params: any[] = [];
+      const params: unknown[] = [];
+      let paramIndex = 1;
       
       if (taskData.title !== undefined) {
-        updateFields.push('title = ?');
+        updateFields.push(`title = $${paramIndex++}`);
         params.push(taskData.title);
       }
       
       if (taskData.description !== undefined) {
-        updateFields.push('description = ?');
+        updateFields.push(`description = $${paramIndex++}`);
         params.push(taskData.description);
       }
       
       if (taskData.columnId !== undefined) {
-        updateFields.push('column_id = ?');
+        updateFields.push(`column_id = $${paramIndex++}`);
         params.push(taskData.columnId);
       }
       
       if (taskData.status !== undefined) {
-        updateFields.push('status = ?');
+        updateFields.push(`status = $${paramIndex++}`);
         params.push(taskData.status);
         
         // Если статус изменился на completed, устанавливаем время завершения
         if (taskData.status === 'completed') {
-          updateFields.push('completed_at = ?');
+          updateFields.push(`completed_at = $${paramIndex++}`);
           params.push(new Date());
         } else {
           updateFields.push('completed_at = NULL');
@@ -629,39 +649,39 @@ export class TaskRepository implements ITaskRepository {
       }
       
       if (taskData.priority !== undefined) {
-        updateFields.push('priority = ?');
+        updateFields.push(`priority = $${paramIndex++}`);
         params.push(taskData.priority);
       }
       
       if (taskData.tags !== undefined) {
-        updateFields.push('tags = ?');
+        updateFields.push(`tags = $${paramIndex++}`);
         params.push(taskData.tags ? JSON.stringify(taskData.tags) : null);
       }
       
       if (taskData.position !== undefined) {
-        updateFields.push('position = ?');
+        updateFields.push(`position = $${paramIndex++}`);
         params.push(taskData.position);
       }
       
       if (taskData.estimatedHours !== undefined) {
-        updateFields.push('estimated_hours = ?');
+        updateFields.push(`estimated_hours = $${paramIndex++}`);
         params.push(taskData.estimatedHours);
       }
       
       if (taskData.actualHours !== undefined) {
-        updateFields.push('actual_hours = ?');
+        updateFields.push(`actual_hours = $${paramIndex++}`);
         params.push(taskData.actualHours);
       }
       
       if (taskData.deadline !== undefined) {
-        updateFields.push('deadline = ?');
+        updateFields.push(`deadline = $${paramIndex++}`);
         params.push(taskData.deadline);
       }
       
       if (taskData.assigneeIds !== undefined) {
         // Для простоты берем первого назначенного пользователя
         const assigneeId = taskData.assigneeIds.length > 0 ? taskData.assigneeIds[0] : null;
-        updateFields.push('assigned_to = ?');
+        updateFields.push(`assigned_to = $${paramIndex++}`);
         params.push(assigneeId);
       }
       
@@ -669,11 +689,11 @@ export class TaskRepository implements ITaskRepository {
         return await this.findById(id);
       }
       
-      updateFields.push('updated_by = ?', 'updated_at = ?');
+      updateFields.push(`updated_by = $${paramIndex++}`, `updated_at = $${paramIndex++}`);
       params.push(updatedBy, new Date());
       params.push(id);
       
-      const query = `UPDATE tasks SET ${updateFields.join(', ')} WHERE id = ?`;
+      const query = `UPDATE tasks SET ${updateFields.join(', ')} WHERE id = $${paramIndex++}`;
       
       await this.databaseAdapter.query(query, params);
       
@@ -686,7 +706,7 @@ export class TaskRepository implements ITaskRepository {
 
   async delete(id: TaskId): Promise<boolean> {
     try {
-      const query = 'DELETE FROM tasks WHERE id = ?';
+      const query = 'DELETE FROM tasks WHERE id = $1';
       const result = await this.databaseAdapter.query(query, [id]);
       
       return result.affectedRows > 0;
@@ -701,7 +721,7 @@ export class TaskRepository implements ITaskRepository {
       const query = `
         UPDATE tasks 
         SET is_archived = TRUE, archived_at = ?, updated_by = ?, updated_at = ?
-        WHERE id = ?
+        WHERE id = $4
       `;
       
       const now = new Date();
@@ -719,7 +739,7 @@ export class TaskRepository implements ITaskRepository {
       const query = `
         UPDATE tasks 
         SET is_archived = FALSE, archived_at = NULL, updated_by = ?, updated_at = ?
-        WHERE id = ?
+        WHERE id = $3
       `;
       
       const now = new Date();
@@ -734,7 +754,7 @@ export class TaskRepository implements ITaskRepository {
 
   async updatePosition(id: TaskId, newPosition: number): Promise<boolean> {
     try {
-      const query = 'UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?';
+      const query = 'UPDATE tasks SET position = $1, updated_at = $2 WHERE id = $3';
       const result = await this.databaseAdapter.query(query, [newPosition, new Date(), id]);
       
       return result.affectedRows > 0;
@@ -746,7 +766,7 @@ export class TaskRepository implements ITaskRepository {
 
   async getMaxPosition(columnId: ColumnId): Promise<number> {
     try {
-      const query = 'SELECT MAX(position) as maxPosition FROM tasks WHERE column_id = ? AND is_archived = FALSE';
+      const query = 'SELECT MAX(position) as maxPosition FROM tasks WHERE column_id = $1 AND is_archived = FALSE';
       const result = await this.databaseAdapter.query(query, [columnId]);
       
       return result[0]?.maxPosition || 0;
@@ -758,11 +778,12 @@ export class TaskRepository implements ITaskRepository {
 
   async existsByTitle(title: string, boardId: BoardId, excludeId?: TaskId): Promise<boolean> {
     try {
-      let query = 'SELECT COUNT(*) as count FROM tasks WHERE title = ? AND board_id = ? AND is_archived = FALSE';
-      const params: any[] = [title, boardId];
+      let query = 'SELECT COUNT(*) as count FROM tasks WHERE title = $1 AND board_id = $2 AND is_archived = FALSE';
+      const params: unknown[] = [title, boardId];
+      let paramIndex = 3;
       
       if (excludeId) {
-        query += ' AND id != ?';
+        query += ` AND id != $${paramIndex++}`;
         params.push(excludeId);
       }
       
@@ -777,7 +798,7 @@ export class TaskRepository implements ITaskRepository {
 
   async countByBoard(boardId: BoardId): Promise<number> {
     try {
-      const query = 'SELECT COUNT(*) as count FROM tasks WHERE board_id = ? AND is_archived = FALSE';
+      const query = 'SELECT COUNT(*) as count FROM tasks WHERE board_id = $1 AND is_archived = FALSE';
       const result = await this.databaseAdapter.query(query, [boardId]);
       
       return result[0]?.count || 0;
@@ -823,29 +844,39 @@ export class TaskRepository implements ITaskRepository {
     }
   }
 
-  private mapRowToTask(row: any): Task {
+  private mapRowToTask(row: Record<string, unknown>): Task {
     return {
-      id: row.id,
-      title: row.title,
-      description: row.description,
-      boardId: row.boardId,
-      columnId: row.columnId,
-      projectId: row.projectId,
+      id: row.id as string,
+      title: row.title as string,
+      description: row.description as string | undefined,
       status: row.status as TaskStatus,
       priority: row.priority as TaskPriority,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      position: row.position,
-      estimatedHours: row.estimatedHours,
-      actualHours: row.actualHours,
-      deadline: row.deadline ? new Date(row.deadline) : undefined,
-      completedAt: row.completedAt ? new Date(row.completedAt) : undefined,
-      createdBy: row.createdBy,
-      updatedBy: row.updatedBy,
-      assignedTo: row.assignedTo,
-      createdAt: new Date(row.createdAt),
-      updatedAt: new Date(row.updatedAt),
+      columnId: row.columnId as string,
+      boardId: row.boardId as string,
+      projectId: row.projectId as string,
+      position: row.position as number,
+      assigneeId: row.assignedTo as string | undefined,
+      reporterId: row.createdBy as string,
+      dueDate: row.deadline ? new Date(row.deadline as string) : undefined,
+      estimatedHours: row.estimatedHours as number | undefined,
+      actualHours: row.actualHours as number | undefined,
+      progress: undefined,
+      tags: row.tags ? JSON.parse(row.tags as string) : [],
       isArchived: Boolean(row.isArchived),
-      archivedAt: row.archivedAt ? new Date(row.archivedAt) : undefined
+      metadata: {
+        complexity: 1,
+        businessValue: 1,
+        technicalDebt: false,
+        completedAt: row.completedAt ? new Date(row.completedAt as string) : undefined,
+        archivedAt: row.archivedAt ? new Date(row.archivedAt as string) : undefined
+      },
+      dependencies: [],
+      attachments: [],
+      comments: [],
+      timeEntries: [],
+      history: [],
+      createdAt: new Date(row.createdAt as string),
+      updatedAt: new Date(row.updatedAt as string)
     };
   }
 
@@ -864,8 +895,7 @@ export class TaskRepository implements ITaskRepository {
   }
 
   private generateId(): string {
-    // Import crypto for UUID generation
-    const crypto = require('crypto');
-    return crypto.randomUUID();
+    // Generate UUID using crypto
+    return randomUUID();
   }
 }

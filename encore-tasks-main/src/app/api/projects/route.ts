@@ -1,201 +1,196 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth';
-import databaseAdapter from '@/lib/database-adapter-optimized';
+import { z } from 'zod';
+import { DatabaseAdapter } from '@/lib/database-adapter';
 
-// Получение списка проектов
+const databaseAdapter = DatabaseAdapter.getInstance();
+import { verifyAuth } from '@/lib/auth';
+import { CreateProjectDto, ProjectWithStats } from '@/types/core.types';
+
+// Схемы валидации
+const createProjectSchema = z.object({
+  name: z.string().min(1, 'Название проекта обязательно').max(100, 'Название слишком длинное'),
+  description: z.string().max(500, 'Описание слишком длинное').optional(),
+  color: z.string().regex(/^#[0-9A-F]{6}$/i, 'Неверный формат цвета').optional().default('#3B82F6'),
+  icon_url: z.string().min(1, 'Иконка обязательна').optional().default('📋'),
+  visibility: z.enum(['private', 'public']).optional().default('private'),
+  telegram_chat_id: z.string().nullable().optional(),
+  telegram_topic_id: z.string().nullable().optional(),
+  member_ids: z.array(z.string()).optional().default([])
+});
+
+// updateProjectSchema удален - используем схему из validation.ts
+
+// GET /api/projects - Получить все проекты пользователя
 export async function GET(request: NextRequest) {
   try {
     const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    if (!authResult.success || !authResult.user) {
       return NextResponse.json(
-        { error: authResult.error },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { userId, role } = authResult.user!;
+    // Получаем все проекты пользователя
+    const projects = await databaseAdapter.getUserProjects(authResult.user.userId);
 
-    let projects;
-    if (role === 'admin') {
-      // Админы видят все проекты
-      projects = await databaseAdapter.getAllProjects();
-    } else {
-      // Обычные пользователи видят только свои проекты
-      projects = await databaseAdapter.getProjectsByUserId(Number(userId));
-    }
-
-    // Преобразование в формат API с правильной типизацией
-    const projectsResult = projects.map(project => ({
-      id: project.id, // Оставляем ID как строку для совместимости с API удаления
+    // Преобразуем в нужный формат
+    const projectsWithStats = projects.map(project => ({
+      id: project.id,
       name: project.name,
-      description: project.description || null,
-      status: project.status || 'active',
+      description: project.description,
       color: project.color || '#3B82F6',
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-      userId: Number(project.createdBy) // Используем createdBy из схемы БД
+      icon: project.icon_url || '📋',
+      status: 'active',
+      visibility: 'private',
+      telegram_chat_id: null,
+      telegram_topic_id: null,
+      settings: null,
+      created_at: project.created_at,
+      updated_at: project.updated_at,
+      created_by: project.created_by,
+      created_by_username: 'admin',
+      members_count: 1,
+      boards_count: 0,
+      tasks_count: 0
     }));
 
-    return NextResponse.json({ projects: projectsResult });
+    return NextResponse.json({
+      success: true,
+      data: {
+        projects: projectsWithStats,
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: projectsWithStats.length,
+          total_pages: 1
+        }
+      }
+    });
+
   } catch (error) {
-    console.error('Projects API error:', error);
+    console.error('Error fetching projects:', error);
     return NextResponse.json(
-      { error: 'Внутренняя ошибка сервера' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
-// Создание нового проекта
+// POST /api/projects - Создать новый проект
 export async function POST(request: NextRequest) {
   try {
     const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    if (!authResult.success || !authResult.user) {
       return NextResponse.json(
-        { error: authResult.error },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { userId } = authResult.user!;
-    const { name, description, color, icon } = await request.json();
+    const body = await request.json();
+    console.log('📊 Received project data:', JSON.stringify(body, null, 2));
+    
+    const validationResult = createProjectSchema.safeParse(body);
+    console.log('🔍 Validation result:', validationResult.success);
 
-    if (!name) {
+    if (!validationResult.success) {
+      console.log('❌ Validation errors:', validationResult.error);
+      console.log('❌ Validation error details:', JSON.stringify(validationResult.error.issues, null, 2));
       return NextResponse.json(
-        { error: 'Название проекта обязательно' },
+        {
+          success: false,
+          error: 'Validation failed',
+          details: validationResult.error.issues
+        },
         { status: 400 }
       );
     }
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Пользователь не авторизован' },
-        { status: 401 }
-      );
-    }
 
-    const projectData = {
-      name,
-      description: description || null,
-      createdBy: userId, // userId уже является UUID строкой
-      color: color || '#3B82F6'
-    };
-    const project = await databaseAdapter.createProject(projectData);
-    
-    // Проверяем, что проект был создан успешно
-    if (!project || !project.id) {
-      console.error('Failed to create project - no project ID returned');
-      return NextResponse.json(
-        { error: 'Ошибка создания проекта' },
-        { status: 500 }
-      );
-    }
+    const projectData: CreateProjectDto = validationResult.data;
 
-    // Создаем доску по умолчанию для нового проекта
-    const board = await databaseAdapter.createBoard(
-      `Доска проекта ${name}`,
-      '', // description не используется в схеме
-      project.id
-    );
-    
-    console.log('Created board:', board);
-    console.log('Board ID:', board.id, 'Type:', typeof board.id);
+    // Создаем проект используя PostgreSQL адаптер
+    const project = await databaseAdapter.createProject({
+      name: projectData.name,
+      description: projectData.description || '',
+      created_by: authResult.user.userId,
+      color: projectData.color || '#3B82F6',
+      icon_url: projectData.icon || '📋',
+      telegram_chat_id: projectData.telegram_chat_id || null,
+      telegram_topic_id: projectData.telegram_topic_id || null
+    });
 
-    // Создаем колонки по умолчанию
-    const defaultColumns = [
-      { name: 'К выполнению', color: '#ef4444', position: 0 },
-      { name: 'В работе', color: '#f59e0b', position: 1 },
-      { name: 'На проверке', color: '#3b82f6', position: 2 },
-      { name: 'Выполнено', color: '#10b981', position: 3 }
-    ];
-
-    for (const column of defaultColumns) {
-      await databaseAdapter.createColumn(
-        column.name,
-        board.id,
-        column.position,
-        column.color
-      );
-    }
-
-    // Преобразование в формат API с правильной типизацией
-    const projectResult = {
-      id: project.id,
-      name: project.name,
-      description: project.description || null,
-      status: project.status || 'active',
-      color: project.color || '#3B82F6',
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-      userId: project.createdBy
-    };
-
-    return NextResponse.json(
-      { project: projectResult },
-      { status: 201 }
-    );
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        color: project.color,
+        icon: project.icon_url || '📋',
+        status: 'active',
+        visibility: 'private',
+        telegram_chat_id: project.telegram_chat_id,
+        telegram_topic_id: project.telegram_topic_id,
+        settings: null,
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        created_by: project.created_by,
+        created_by_username: 'admin',
+        members_count: 1,
+        boards_count: 0,
+        tasks_count: 0
+      },
+      message: 'Проект успешно создан'
+    }, { status: 201 });
 
   } catch (error) {
-    console.error('Ошибка создания проекта:', error);
+    console.error('Error creating project:', error);
     return NextResponse.json(
-      { error: 'Внутренняя ошибка сервера' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
-// Удаление проекта (только для администраторов)
+// DELETE /api/projects - Удалить проекты (только для админов)
 export async function DELETE(request: NextRequest) {
   try {
     const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    if (!authResult.success || !authResult.user) {
       return NextResponse.json(
-        { error: authResult.error },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { user } = authResult;
-    
-    // Проверка прав администратора
-    if (user.role !== 'admin') {
+    if (authResult.user.role !== 'admin') {
       return NextResponse.json(
-        { error: 'Недостаточно прав для удаления проекта' },
+        { success: false, error: 'Forbidden: Admin access required' },
         { status: 403 }
       );
     }
 
     const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('projectId');
+    const projectIds = searchParams.get('ids')?.split(',') || [];
 
-    if (!projectId) {
+    if (projectIds.length === 0) {
       return NextResponse.json(
-        { error: 'ID проекта обязателен' },
+        { success: false, error: 'No project IDs provided' },
         { status: 400 }
       );
     }
 
-    // Проверка существования проекта
-    const project = await databaseAdapter.getProjectById(projectId);
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Проект не найден' },
-        { status: 404 }
-      );
-    }
-
-    // Удаление проекта
-    await databaseAdapter.deleteProject(projectId);
-
-    return NextResponse.json(
-      { message: 'Проект успешно удален' },
-      { status: 200 }
-    );
+    // Удаление проектов пока не реализовано
+    return NextResponse.json({
+      success: false,
+      error: 'Project deletion not implemented'
+    }, { status: 501 });
 
   } catch (error) {
-    console.error('Ошибка удаления проекта:', error);
+    console.error('Error deleting projects:', error);
     return NextResponse.json(
-      { error: 'Внутренняя ошибка сервера' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }

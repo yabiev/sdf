@@ -7,7 +7,11 @@ import {
   SearchFilters,
   SortOptions,
   PaginationOptions,
-  ValidationResult
+  Comment,
+  Attachment,
+  TimeEntry,
+  TaskAction,
+  TaskDependency
 } from '../../data/types';
 import { taskRepository } from '../../data/repositories';
 import { TaskValidator } from '../validators';
@@ -24,53 +28,88 @@ export class TaskService implements ITaskService {
     this.validator = validator;
   }
 
-  async getById(id: string): Promise<Task | null> {
+  async getById(id: string, userId: string): Promise<Task> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findById(id);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    const task = await this.repository.findById(id);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+
+    // TODO: Add permission check here
+    // const hasAccess = await this.canUserAccess(id, userId);
+    // if (!hasAccess) {
+    //   throw new Error('Access denied');
+    // }
+
+    return task;
   }
 
   async getByColumnId(
     columnId: string,
-    filters?: SearchFilters
+    userId: string,
+    includeArchived?: boolean
   ): Promise<Task[]> {
     const validation = this.validator.validateId(columnId);
     if (!validation.isValid) {
       throw new Error(`Invalid column ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findByColumnId(columnId, filters);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    return await this.repository.findByColumnId(columnId, includeArchived);
   }
 
   async getByBoardId(
     boardId: string,
-    filters?: SearchFilters
+    userId: string,
+    includeArchived?: boolean
   ): Promise<Task[]> {
     const validation = this.validator.validateId(boardId);
     if (!validation.isValid) {
       throw new Error(`Invalid board ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findByBoardId(boardId, filters);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    return await this.repository.findByBoardId(boardId, includeArchived);
   }
 
   async getByProjectId(
     projectId: string,
-    filters?: SearchFilters
+    userId: string,
+    includeArchived?: boolean
   ): Promise<Task[]> {
     const validation = this.validator.validateId(projectId);
     if (!validation.isValid) {
       throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findByProjectId(projectId, filters);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    return await this.repository.findByProjectId(projectId, includeArchived);
   }
 
   async getByAssigneeId(
     assigneeId: string,
+    userId: string,
     filters?: SearchFilters
   ): Promise<Task[]> {
     const validation = this.validator.validateId(assigneeId);
@@ -78,14 +117,24 @@ export class TaskService implements ITaskService {
       throw new Error(`Invalid assignee ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findByAssigneeId(assigneeId, filters);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    return await this.repository.findByAssigneeId(assigneeId);
   }
 
   async getAll(
+    userId: string,
     filters?: SearchFilters,
     sort?: SortOptions,
     pagination?: PaginationOptions
   ): Promise<Task[]> {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
     if (filters) {
       const validation = this.validator.validateSearchFilters(filters);
       if (!validation.isValid) {
@@ -102,17 +151,24 @@ export class TaskService implements ITaskService {
 
     if (pagination) {
       const validation = this.validator.validatePaginationOptions(pagination);
-      if (!pagination.isValid) {
+      if (!validation.isValid) {
         throw new Error(`Invalid pagination options: ${validation.errors.join(', ')}`);
       }
     }
 
-    return await this.repository.findAll(filters, sort, pagination);
+    // Extract includeArchived from filters if present
+    const includeArchived = filters?.isArchived || false;
+    return await this.repository.findAll(includeArchived, sort, pagination);
   }
 
   async create(
-    taskData: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
+    taskData: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'dependencies' | 'attachments' | 'comments' | 'timeEntries' | 'history'>,
+    userId: string
   ): Promise<Task> {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
     const validation = this.validator.validateCreate(taskData);
     if (!validation.isValid) {
       throw new Error(`Invalid task data: ${validation.errors.join(', ')}`);
@@ -124,17 +180,17 @@ export class TaskService implements ITaskService {
       status: taskData.status || 'todo',
       priority: taskData.priority || 'medium',
       isArchived: taskData.isArchived || false,
-      labels: taskData.labels || [],
-      assignees: taskData.assignees || [],
-      comments: taskData.comments || [],
-      attachments: taskData.attachments || [],
-      timeEntries: taskData.timeEntries || [],
-      actions: taskData.actions || [],
-      dependencies: taskData.dependencies || [],
-      subtasks: taskData.subtasks || [],
-      estimatedHours: taskData.estimatedHours || null,
-      actualHours: taskData.actualHours || 0,
-      completionPercentage: taskData.completionPercentage || 0
+      tags: taskData.tags || [],
+      dependencies: [],
+      attachments: [],
+      comments: [],
+      timeEntries: [],
+      history: [],
+      metadata: taskData.metadata || {
+        complexity: 1,
+        businessValue: 1,
+        technicalDebt: false
+      }
     };
 
     // Business logic: Validate due date
@@ -147,8 +203,13 @@ export class TaskService implements ITaskService {
 
   async update(
     id: string,
-    updates: Partial<Task>
+    updates: Partial<Task>,
+    userId: string
   ): Promise<Task> {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
     const idValidation = this.validator.validateId(id);
     if (!idValidation.isValid) {
       throw new Error(`Invalid task ID: ${idValidation.errors.join(', ')}`);
@@ -170,21 +231,30 @@ export class TaskService implements ITaskService {
       throw new Error('Cannot update title, description, or status of archived task');
     }
 
-    // Business logic: Auto-complete task if completion percentage is 100%
-    if (updates.completionPercentage === 100 && existingTask.status !== 'done') {
-      updates.status = 'done';
-      updates.completedAt = new Date();
+    // Business logic: Auto-complete task if status is set to done
+    if (updates.status === 'done' && existingTask.status !== 'done') {
+      updates.metadata = {
+        ...existingTask.metadata,
+        completedAt: new Date()
+      };
     }
 
     // Business logic: Reset completion date if status changes from done
     if (updates.status && updates.status !== 'done' && existingTask.status === 'done') {
-      updates.completedAt = null;
+      updates.metadata = {
+        ...existingTask.metadata,
+        completedAt: undefined
+      };
     }
 
     return await this.repository.update(id, updates);
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, userId: string): Promise<void> {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
@@ -197,14 +267,18 @@ export class TaskService implements ITaskService {
     }
 
     // Business logic: Check for dependencies
-    if (existingTask.subtasks && existingTask.subtasks.length > 0) {
-      throw new Error('Cannot delete task with subtasks. Delete subtasks first.');
+    if (existingTask.dependencies && existingTask.dependencies.length > 0) {
+      throw new Error('Cannot delete task with dependencies. Remove dependencies first.');
     }
 
     await this.repository.delete(id);
   }
 
-  async archive(id: string): Promise<Task> {
+  async archive(id: string, userId: string): Promise<Task> {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
@@ -223,7 +297,11 @@ export class TaskService implements ITaskService {
     return await this.repository.archive(id);
   }
 
-  async restore(id: string): Promise<Task> {
+  async restore(id: string, userId: string): Promise<Task> {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
@@ -272,13 +350,24 @@ export class TaskService implements ITaskService {
       throw new Error('Cannot move archived task');
     }
 
-    await this.repository.updatePosition(id, newColumnId, position);
+    // Update task position in the new column
+    await this.repository.updatePosition(id, position);
+    
+    // Update the column assignment if different
+    if (newColumnId) {
+      await this.repository.update(id, { columnId: newColumnId });
+    }
   }
 
-  async updateStatus(id: string, status: Task['status']): Promise<Task> {
+  async updateStatus(id: string, status: Task['status'], userId: string): Promise<Task> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
     }
 
     if (!['todo', 'in_progress', 'review', 'done'].includes(status)) {
@@ -300,22 +389,32 @@ export class TaskService implements ITaskService {
 
     // Business logic: Set completion date when marking as done
     if (status === 'done' && existingTask.status !== 'done') {
-      updates.completedAt = new Date();
-      updates.completionPercentage = 100;
+      updates.metadata = {
+        ...existingTask.metadata,
+        completedAt: new Date()
+      };
     }
 
     // Business logic: Clear completion date when moving from done
     if (status !== 'done' && existingTask.status === 'done') {
-      updates.completedAt = null;
+      updates.metadata = {
+        ...existingTask.metadata,
+        completedAt: undefined
+      };
     }
 
-    return await this.repository.updateStatus(id, status);
+    return await this.repository.update(id, updates);
   }
 
-  async updatePriority(id: string, priority: Task['priority']): Promise<Task> {
+  async updatePriority(id: string, priority: Task['priority'], userId: string): Promise<Task> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
     }
 
     if (!['low', 'medium', 'high', 'urgent'].includes(priority)) {
@@ -333,22 +432,111 @@ export class TaskService implements ITaskService {
       throw new Error('Cannot change priority of archived task');
     }
 
-    return await this.repository.updatePriority(id, priority);
+    return await this.repository.update(id, { priority });
   }
 
-  async assignUser(taskId: string, userId: string): Promise<void> {
-    const taskIdValidation = this.validator.validateId(taskId);
-    if (!taskIdValidation.isValid) {
-      throw new Error(`Invalid task ID: ${taskIdValidation.errors.join(', ')}`);
+  async move(id: string, columnId: string, position: number, userId: string): Promise<Task> {
+    const idValidation = this.validator.validateId(id);
+    if (!idValidation.isValid) {
+      throw new Error(`Invalid task ID: ${idValidation.errors.join(', ')}`);
     }
 
-    const userIdValidation = this.validator.validateId(userId);
-    if (!userIdValidation.isValid) {
-      throw new Error(`Invalid user ID: ${userIdValidation.errors.join(', ')}`);
+    const columnValidation = this.validator.validateId(columnId);
+    if (!columnValidation.isValid) {
+      throw new Error(`Invalid column ID: ${columnValidation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    if (position < 0) {
+      throw new Error('Position must be non-negative');
     }
 
     // Check if task exists
-    const existingTask = await this.repository.findById(taskId);
+    const existingTask = await this.repository.findById(id);
+    if (!existingTask) {
+      throw new Error('Task not found');
+    }
+
+    // Business logic: Cannot move archived tasks
+    if (existingTask.isArchived) {
+      throw new Error('Cannot move archived task');
+    }
+
+    return await this.repository.move(id, columnId, position);
+  }
+
+  async reorder(columnId: string, taskIds: string[], userId: string): Promise<void> {
+    const columnValidation = this.validator.validateId(columnId);
+    if (!columnValidation.isValid) {
+      throw new Error(`Invalid column ID: ${columnValidation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    if (!taskIds || taskIds.length === 0) {
+      throw new Error('Task IDs are required');
+    }
+
+    // Validate all task IDs
+    for (const taskId of taskIds) {
+      const validation = this.validator.validateId(taskId);
+      if (!validation.isValid) {
+        throw new Error(`Invalid task ID: ${taskId}`);
+      }
+    }
+
+    await this.repository.reorderTasks(columnId, taskIds);
+  }
+
+  async duplicate(id: string, newTitle: string, userId: string): Promise<Task> {
+    const idValidation = this.validator.validateId(id);
+    if (!idValidation.isValid) {
+      throw new Error(`Invalid task ID: ${idValidation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    if (!newTitle || newTitle.trim().length === 0) {
+      throw new Error('New title is required');
+    }
+
+    // Check if task exists
+    const existingTask = await this.repository.findById(id);
+    if (!existingTask) {
+      throw new Error('Task not found');
+    }
+
+    return await this.repository.duplicate(id, newTitle.trim());
+  }
+
+  async assign(id: string, assigneeId: string, userId: string): Promise<Task> {
+    const idValidation = this.validator.validateId(id);
+    if (!idValidation.isValid) {
+      throw new Error(`Invalid task ID: ${idValidation.errors.join(', ')}`);
+    }
+
+    const assigneeValidation = this.validator.validateId(assigneeId);
+    if (!assigneeValidation.isValid) {
+      throw new Error(`Invalid assignee ID: ${assigneeValidation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    // Check if task exists
+    const existingTask = await this.repository.findById(id);
     if (!existingTask) {
       throw new Error('Task not found');
     }
@@ -359,27 +547,26 @@ export class TaskService implements ITaskService {
     }
 
     // Business logic: Check if user is already assigned
-    const isAlreadyAssigned = existingTask.assignees?.some(a => a.userId === userId);
-    if (isAlreadyAssigned) {
+    if (existingTask.assigneeId === assigneeId) {
       throw new Error('User is already assigned to this task');
     }
 
-    await this.repository.assignUser(taskId, userId);
+    return await this.repository.update(id, { assigneeId });
   }
 
-  async unassignUser(taskId: string, userId: string): Promise<void> {
-    const taskIdValidation = this.validator.validateId(taskId);
-    if (!taskIdValidation.isValid) {
-      throw new Error(`Invalid task ID: ${taskIdValidation.errors.join(', ')}`);
+  async unassign(id: string, userId: string): Promise<Task> {
+    const idValidation = this.validator.validateId(id);
+    if (!idValidation.isValid) {
+      throw new Error(`Invalid task ID: ${idValidation.errors.join(', ')}`);
     }
 
-    const userIdValidation = this.validator.validateId(userId);
-    if (!userIdValidation.isValid) {
-      throw new Error(`Invalid user ID: ${userIdValidation.errors.join(', ')}`);
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
     }
 
     // Check if task exists
-    const existingTask = await this.repository.findById(taskId);
+    const existingTask = await this.repository.findById(id);
     if (!existingTask) {
       throw new Error('Task not found');
     }
@@ -389,19 +576,22 @@ export class TaskService implements ITaskService {
       throw new Error('Cannot unassign users from archived task');
     }
 
-    await this.repository.unassignUser(taskId, userId);
+    return await this.repository.update(id, { assigneeId: undefined });
   }
+
+
 
   async addComment(
     taskId: string,
-    comment: Omit<Task['comments'][0], 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<Task['comments'][0]> {
+    content: string,
+    userId: string
+  ): Promise<void> {
     const validation = this.validator.validateId(taskId);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
     }
 
-    if (!comment.content || comment.content.trim().length === 0) {
+    if (!content || content.trim().length === 0) {
       throw new Error('Comment content is required');
     }
 
@@ -416,67 +606,77 @@ export class TaskService implements ITaskService {
       throw new Error('Cannot add comments to archived task');
     }
 
-    return await this.repository.addComment(taskId, comment);
+    const comment = {
+      content,
+      authorId: userId
+    };
+
+    await this.repository.addComment(taskId, comment);
   }
 
   async updateComment(
-    taskId: string,
     commentId: string,
-    updates: Partial<Task['comments'][0]>
-  ): Promise<Task['comments'][0]> {
-    const taskIdValidation = this.validator.validateId(taskId);
-    if (!taskIdValidation.isValid) {
-      throw new Error(`Invalid task ID: ${taskIdValidation.errors.join(', ')}`);
-    }
-
+    content: string,
+    userId: string
+  ): Promise<Comment> {
     const commentIdValidation = this.validator.validateId(commentId);
     if (!commentIdValidation.isValid) {
       throw new Error(`Invalid comment ID: ${commentIdValidation.errors.join(', ')}`);
     }
 
-    // Check if task exists
-    const existingTask = await this.repository.findById(taskId);
-    if (!existingTask) {
-      throw new Error('Task not found');
+    const userIdValidation = this.validator.validateId(userId);
+    if (!userIdValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userIdValidation.errors.join(', ')}`);
     }
 
-    // Business logic: Cannot update comments on archived tasks
-    if (existingTask.isArchived) {
-      throw new Error('Cannot update comments on archived task');
+    if (!content || content.trim().length === 0) {
+      throw new Error('Comment content is required');
     }
 
-    return await this.repository.updateComment(taskId, commentId, updates);
+    const updates = {
+      content: content.trim(),
+      isEdited: true,
+      updatedAt: new Date()
+    };
+
+    return await this.repository.updateComment(commentId, updates);
   }
 
-  async deleteComment(taskId: string, commentId: string): Promise<void> {
-    const taskIdValidation = this.validator.validateId(taskId);
-    if (!taskIdValidation.isValid) {
-      throw new Error(`Invalid task ID: ${taskIdValidation.errors.join(', ')}`);
-    }
-
+  async deleteComment(commentId: string, userId: string): Promise<void> {
     const commentIdValidation = this.validator.validateId(commentId);
     if (!commentIdValidation.isValid) {
       throw new Error(`Invalid comment ID: ${commentIdValidation.errors.join(', ')}`);
     }
 
-    await this.repository.deleteComment(taskId, commentId);
+    const userIdValidation = this.validator.validateId(userId);
+    if (!userIdValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userIdValidation.errors.join(', ')}`);
+    }
+
+    await this.repository.deleteComment(commentId);
   }
 
   async addAttachment(
-    taskId: string,
-    attachment: Omit<Task['attachments'][0], 'id' | 'createdAt'>
-  ): Promise<Task['attachments'][0]> {
-    const validation = this.validator.validateId(taskId);
+    id: string,
+    attachment: Omit<Attachment, 'id' | 'createdAt'>,
+    userId: string
+  ): Promise<Attachment> {
+    const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
     }
 
-    if (!attachment.filename || !attachment.url) {
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    if (!attachment.fileName || !attachment.url) {
       throw new Error('Attachment filename and URL are required');
     }
 
     // Check if task exists
-    const existingTask = await this.repository.findById(taskId);
+    const existingTask = await this.repository.findById(id);
     if (!existingTask) {
       throw new Error('Task not found');
     }
@@ -486,7 +686,126 @@ export class TaskService implements ITaskService {
       throw new Error('Cannot add attachments to archived task');
     }
 
-    return await this.repository.addAttachment(taskId, attachment);
+    return await this.repository.addAttachment(id, attachment, userId);
+  }
+
+  async addDependency(taskId: string, dependencyData: Omit<TaskDependency, 'id' | 'createdAt' | 'createdBy'>, userId: string): Promise<TaskDependency> {
+    const validation = this.validator.validateId(taskId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    // Check if task exists
+    const existingTask = await this.repository.findById(taskId);
+    if (!existingTask) {
+      throw new Error('Task not found');
+    }
+
+    // Business logic: Cannot add dependencies to archived tasks
+    if (existingTask.isArchived) {
+      throw new Error('Cannot add dependencies to archived task');
+    }
+
+    return await this.repository.addDependency(taskId, dependencyData, userId);
+  }
+
+  async removeDependency(dependencyId: string, userId: string): Promise<void> {
+    const depValidation = this.validator.validateId(dependencyId);
+    if (!depValidation.isValid) {
+      throw new Error(`Invalid dependency ID: ${depValidation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    await this.repository.removeDependency(dependencyId);
+  }
+
+  async startTimeTracking(taskId: string, userId: string): Promise<TimeEntry> {
+    const validation = this.validator.validateId(taskId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    // Check if task exists
+    const existingTask = await this.repository.findById(taskId);
+    if (!existingTask) {
+      throw new Error('Task not found');
+    }
+
+    // Business logic: Cannot track time on archived tasks
+    if (existingTask.isArchived) {
+      throw new Error('Cannot track time on archived task');
+    }
+
+    return await this.repository.startTimeTracking(taskId, userId);
+  }
+
+  async stopTimeTracking(entryId: string, userId: string): Promise<TimeEntry> {
+    const validation = this.validator.validateId(entryId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid entry ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    return await this.repository.stopTimeTracking(entryId);
+  }
+
+  async getTimeEntries(taskId: string, userId: string): Promise<TimeEntry[]> {
+    const validation = this.validator.validateId(taskId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    // Check if task exists
+    const existingTask = await this.repository.findById(taskId);
+    if (!existingTask) {
+      throw new Error('Task not found');
+    }
+
+    return await this.repository.getTimeEntries(taskId);
+  }
+
+  async getHistory(taskId: string, userId: string): Promise<Task['history']> {
+    const validation = this.validator.validateId(taskId);
+    if (!validation.isValid) {
+      throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
+    }
+
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
+    }
+
+    // Check if task exists
+    const existingTask = await this.repository.findById(taskId);
+    if (!existingTask) {
+      throw new Error('Task not found');
+    }
+
+    // Return the task's history property
+    return existingTask.history || [];
   }
 
   async deleteAttachment(taskId: string, attachmentId: string): Promise<void> {
@@ -500,20 +819,20 @@ export class TaskService implements ITaskService {
       throw new Error(`Invalid attachment ID: ${attachmentIdValidation.errors.join(', ')}`);
     }
 
-    await this.repository.deleteAttachment(taskId, attachmentId);
+    await this.repository.deleteAttachment(attachmentId);
   }
 
   async addTimeEntry(
     taskId: string,
-    timeEntry: Omit<Task['timeEntries'][0], 'id' | 'createdAt'>
-  ): Promise<Task['timeEntries'][0]> {
+    timeEntry: Omit<TimeEntry, 'id' | 'createdAt'>
+  ): Promise<TimeEntry> {
     const validation = this.validator.validateId(taskId);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
     }
 
-    if (!timeEntry.hours || timeEntry.hours <= 0) {
-      throw new Error('Time entry hours must be positive');
+    if (!timeEntry.duration || timeEntry.duration <= 0) {
+      throw new Error('Time entry duration must be positive');
     }
 
     // Check if task exists
@@ -528,8 +847,8 @@ export class TaskService implements ITaskService {
   async updateTimeEntry(
     taskId: string,
     timeEntryId: string,
-    updates: Partial<Task['timeEntries'][0]>
-  ): Promise<Task['timeEntries'][0]> {
+    updates: Partial<TimeEntry>
+  ): Promise<TimeEntry> {
     const taskIdValidation = this.validator.validateId(taskId);
     if (!taskIdValidation.isValid) {
       throw new Error(`Invalid task ID: ${taskIdValidation.errors.join(', ')}`);
@@ -540,11 +859,11 @@ export class TaskService implements ITaskService {
       throw new Error(`Invalid time entry ID: ${timeEntryIdValidation.errors.join(', ')}`);
     }
 
-    if (updates.hours !== undefined && updates.hours <= 0) {
-      throw new Error('Time entry hours must be positive');
+    if (updates.duration !== undefined && updates.duration <= 0) {
+      throw new Error('Time entry duration must be positive');
     }
 
-    return await this.repository.updateTimeEntry(taskId, timeEntryId, updates);
+    return await this.repository.updateTimeEntry(timeEntryId, updates);
   }
 
   async deleteTimeEntry(taskId: string, timeEntryId: string): Promise<void> {
@@ -558,19 +877,19 @@ export class TaskService implements ITaskService {
       throw new Error(`Invalid time entry ID: ${timeEntryIdValidation.errors.join(', ')}`);
     }
 
-    await this.repository.deleteTimeEntry(taskId, timeEntryId);
+    await this.repository.deleteTimeEntry(timeEntryId);
   }
 
   async logAction(
     taskId: string,
-    action: Omit<Task['actions'][0], 'id' | 'createdAt'>
-  ): Promise<Task['actions'][0]> {
+    action: Omit<TaskAction, 'id' | 'createdAt'>
+  ): Promise<TaskAction> {
     const validation = this.validator.validateId(taskId);
     if (!validation.isValid) {
       throw new Error(`Invalid task ID: ${validation.errors.join(', ')}`);
     }
 
-    if (!action.type || !action.userId) {
+    if (!action.action || !action.userId) {
       throw new Error('Action type and user ID are required');
     }
 
@@ -579,26 +898,16 @@ export class TaskService implements ITaskService {
 
   async search(
     query: string,
-    projectId?: string,
-    boardId?: string,
+    userId: string,
     filters?: SearchFilters
   ): Promise<Task[]> {
     if (!query || query.trim().length === 0) {
       throw new Error('Search query is required');
     }
-
-    if (projectId) {
-      const validation = this.validator.validateId(projectId);
-      if (!validation.isValid) {
-        throw new Error(`Invalid project ID: ${validation.errors.join(', ')}`);
-      }
-    }
-
-    if (boardId) {
-      const validation = this.validator.validateId(boardId);
-      if (!validation.isValid) {
-        throw new Error(`Invalid board ID: ${validation.errors.join(', ')}`);
-      }
+    
+    const userValidation = this.validator.validateId(userId);
+    if (!userValidation.isValid) {
+      throw new Error(`Invalid user ID: ${userValidation.errors.join(', ')}`);
     }
 
     if (filters) {
@@ -608,37 +917,10 @@ export class TaskService implements ITaskService {
       }
     }
 
-    return await this.repository.search(query, projectId, boardId, filters);
+    return await this.repository.search(query, filters);
   }
 
-  async getOverdueTasks(userId?: string): Promise<Task[]> {
-    if (userId) {
-      const validation = this.validator.validateId(userId);
-      if (!validation.isValid) {
-        throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-      }
-    }
 
-    return await this.repository.getOverdueTasks(userId);
-  }
-
-  async getUpcomingTasks(
-    userId?: string,
-    days: number = 7
-  ): Promise<Task[]> {
-    if (userId) {
-      const validation = this.validator.validateId(userId);
-      if (!validation.isValid) {
-        throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-      }
-    }
-
-    if (days <= 0 || days > 365) {
-      throw new Error('Days must be between 1 and 365');
-    }
-
-    return await this.repository.getUpcomingTasks(userId, days);
-  }
 
   async canUserAccess(taskId: string, userId: string): Promise<boolean> {
     const taskIdValidation = this.validator.validateId(taskId);

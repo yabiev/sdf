@@ -27,7 +27,7 @@ export class PermissionService implements IBoardPermissionService {
                p.creator_id as project_owner
         FROM boards b
         JOIN projects p ON b.project_id = p.id
-        WHERE b.id = ?
+        WHERE b.id = $1
       `;
       
       const boardResult = await this.databaseAdapter.query(boardQuery, [boardId]);
@@ -46,7 +46,7 @@ export class PermissionService implements IBoardPermissionService {
       // Проверяем членство в проекте
       const memberQuery = `
         SELECT role FROM project_members 
-        WHERE project_id = ? AND user_id = ?
+        WHERE project_id = $1 AND user_id = $2
       `;
       
       const memberResult = await this.databaseAdapter.query(memberQuery, [board.project_id, userId]);

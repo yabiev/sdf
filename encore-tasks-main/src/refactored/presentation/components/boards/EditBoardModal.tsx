@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Board, UpdateBoardData } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select } from '../../common';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { Input } from '../common/Input';
+import { Textarea } from '../common/Textarea';
+import { Select } from '../common/Select';
 import { BoardValidator } from '../../../business/validators';
 import { useProjects } from '../../hooks/useProjects';
 
@@ -67,16 +71,16 @@ const EditBoardModal: React.FC<EditBoardModalProps> = ({
     const newErrors: Record<string, string> = {};
 
     // Validate name
-    const nameValidation = BoardValidator.validateName(formData.name);
+    const nameValidation = BoardValidator.validateName(formData.name || '');
     if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.errors[0];
+      newErrors.name = nameValidation.errors[0].message;
     }
 
     // Validate description (optional)
     if (formData.description) {
       const descValidation = BoardValidator.validateDescription(formData.description);
       if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
+        newErrors.description = descValidation.errors[0].message;
       }
     }
 
@@ -86,7 +90,7 @@ const EditBoardModal: React.FC<EditBoardModalProps> = ({
     } else {
       const projectValidation = BoardValidator.validateProjectId(formData.projectId);
       if (!projectValidation.isValid) {
-        newErrors.projectId = projectValidation.errors[0];
+        newErrors.projectId = projectValidation.errors[0].message;
       }
     }
 
@@ -196,7 +200,7 @@ const EditBoardModal: React.FC<EditBoardModalProps> = ({
           </label>
           <Select
             id="edit-board-project"
-            value={formData.projectId}
+            value={formData.projectId || ''}
             onChange={(value) => handleInputChange('projectId', value)}
             options={projectOptions}
             placeholder="Select a project"

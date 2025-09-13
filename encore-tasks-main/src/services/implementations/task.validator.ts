@@ -4,19 +4,15 @@
  */
 
 import {
-  Task,
   TaskId,
-  BoardId,
   ColumnId,
-  ProjectId,
-  UserId,
   CreateTaskDto,
   UpdateTaskDto,
   TaskStatus,
   TaskPriority,
   ValidationResult,
   ValidationError
-} from '../../types/board.types';
+} from '../../refactored/data/types';
 
 import { ITaskValidator } from '../interfaces/task.service.interface';
 
@@ -562,7 +558,7 @@ export class TaskValidator implements ITaskValidator {
   }
 
   private isValidTaskStatus(status: string): status is TaskStatus {
-    const validStatuses: TaskStatus[] = ['todo', 'in_progress', 'review', 'completed', 'blocked'];
+    const validStatuses: TaskStatus[] = ['todo', 'in_progress', 'review', 'done', 'blocked'];
     return validStatuses.includes(status as TaskStatus);
   }
 

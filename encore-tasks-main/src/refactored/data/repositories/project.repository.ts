@@ -59,7 +59,7 @@ export class ProjectRepository implements IProjectRepository {
         WHERE pm.user_id = ?
       `;
       
-      const params: any[] = [userId];
+      const params: unknown[] = [userId];
 
       // Apply filters
       if (filters?.isArchived !== undefined) {
@@ -103,7 +103,7 @@ export class ProjectRepository implements IProjectRepository {
         WHERE 1=1
       `;
       
-      const params: any[] = [];
+      const params: unknown[] = [];
 
       // Apply filters
       if (filters?.isArchived !== undefined) {
@@ -205,7 +205,7 @@ export class ProjectRepository implements IProjectRepository {
 
   async update(id: string, updates: Partial<Project>): Promise<Project> {
     try {
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, unknown> = {};
 
       if (updates.name !== undefined) updateData.name = updates.name;
       if (updates.description !== undefined) updateData.description = updates.description;
@@ -266,7 +266,7 @@ export class ProjectRepository implements IProjectRepository {
           (SELECT COUNT(DISTINCT pm.user_id) FROM project_members pm WHERE pm.project_id = ?) as active_members_count
       `;
       
-      const result = await databaseAdapter.queryOne(sql, [id, id, id, id, id]);
+      const result = await databaseAdapter.queryOne(sql, [id, id, id, id, id]) as any;
       
       return {
         totalBoards: result?.total_boards || 0,
@@ -290,9 +290,9 @@ export class ProjectRepository implements IProjectRepository {
         ORDER BY pm.joined_at ASC
       `;
       
-      const rows = await databaseAdapter.query(sql, [id]);
+      const rows = await databaseAdapter.query(sql, [id]) as any[];
       
-      return rows.map(row => ({
+      return rows.map((row: any) => ({
         userId: row.user_id,
         role: row.role,
         joinedAt: new Date(row.joined_at),
@@ -344,26 +344,47 @@ export class ProjectRepository implements IProjectRepository {
     }
   }
 
-  private transformToProject(row: any): Project {
-    const members = row.members ? JSON.parse(row.members) : [];
+  async checkPermissions(projectId: string, userId: string, permission: string): Promise<boolean> {
+    try {
+      const sql = `
+        SELECT pm.permissions
+        FROM project_members pm
+        WHERE pm.project_id = ? AND pm.user_id = ?
+      `;
+      
+      const result = await databaseAdapter.queryOne(sql, [projectId, userId]) as any;
+      
+      if (!result) {
+        return false;
+      }
+      
+      const permissions = JSON.parse(result.permissions || '{}');
+      return Boolean(permissions[permission]);
+    } catch (error) {
+      throw new Error(`Failed to check permissions: ${error}`);
+    }
+  }
+
+  private transformToProject(row: Record<string, unknown>): Project {
+    const members = row.members ? JSON.parse(row.members as string) : [];
     
     return {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      color: row.color,
-      ownerId: row.creator_id,
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string,
+      color: row.color as string,
+      ownerId: row.creator_id as string,
       isArchived: Boolean(row.is_archived),
-      settings: JSON.parse(row.settings || '{}'),
-      members: members.filter((m: any) => m.userId).map((m: any) => ({
-        userId: m.userId,
-        role: m.role,
-        joinedAt: new Date(m.joinedAt),
-        permissions: JSON.parse(m.permissions || '{}')
+      settings: JSON.parse((row.settings as string) || '{}'),
+      members: members.filter((m: Record<string, unknown>) => m.userId).map((m: Record<string, unknown>) => ({
+        userId: m.userId as string,
+        role: m.role as string,
+        joinedAt: new Date(m.joinedAt as string),
+        permissions: JSON.parse((m.permissions as string) || '{}')
       })),
-      statistics: JSON.parse(row.statistics || '{}'),
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at)
+      statistics: JSON.parse((row.statistics as string) || '{}'),
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string)
     };
   }
 }

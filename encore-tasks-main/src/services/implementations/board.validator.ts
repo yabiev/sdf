@@ -4,7 +4,6 @@
  */
 
 import {
-  Board,
   BoardId,
   ProjectId,
   CreateBoardDto,
@@ -497,7 +496,7 @@ export class BoardValidator implements IBoardValidator {
     };
   }
   
-  private validateSettings(settings: any): ValidationResult {
+  private validateSettings(settings: Record<string, unknown>): ValidationResult {
     const errors: ValidationError[] = [];
     
     if (settings !== null && settings !== undefined) {

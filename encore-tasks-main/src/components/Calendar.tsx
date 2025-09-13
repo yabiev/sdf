@@ -64,8 +64,8 @@ export function Calendar({ onTaskClick }: CalendarProps) {
       return taskDate.toDateString() === date.toDateString();
     }).sort((a, b) => {
       // Sort to show current user's tasks first
-      const aAssignees = a.assignees || (a.assignee ? [a.assignee] : []);
-      const bAssignees = b.assignees || (b.assignee ? [b.assignee] : []);
+      const aAssignees = a.assignees || [];
+      const bAssignees = b.assignees || [];
       const aIsCurrentUser = aAssignees.some(assignee => assignee.id === state.currentUser?.id) ? 1 : 0;
       const bIsCurrentUser = bAssignees.some(assignee => assignee.id === state.currentUser?.id) ? 1 : 0;
       return bIsCurrentUser - aIsCurrentUser;

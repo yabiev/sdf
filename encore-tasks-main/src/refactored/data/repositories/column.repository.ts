@@ -28,8 +28,22 @@ export class ColumnRepository implements IColumnRepository {
 
   async findByBoardId(boardId: string, filters?: SearchFilters): Promise<Column[]> {
     try {
-      let sql = 'SELECT * FROM columns WHERE board_id = ?';
-      const params: any[] = [boardId];
+      let sql = `
+        SELECT 
+          id,
+          title,
+          board_id,
+          position,
+          color,
+          settings,
+          created_by,
+          task_limit,
+          is_archived,
+          created_at,
+          updated_at
+        FROM columns 
+        WHERE board_id = ?`;
+      const params: unknown[] = [boardId];
 
       // Apply filters
       if (filters?.isArchived !== undefined) {
@@ -57,8 +71,22 @@ export class ColumnRepository implements IColumnRepository {
     pagination?: PaginationOptions
   ): Promise<Column[]> {
     try {
-      let sql = 'SELECT * FROM columns WHERE 1=1';
-      const params: any[] = [];
+      let sql = `
+        SELECT 
+          id,
+          title,
+          board_id,
+          position,
+          color,
+          settings,
+          created_by,
+          task_limit,
+          is_archived,
+          created_at,
+          updated_at
+        FROM columns 
+        WHERE 1=1`;
+      const params: unknown[] = [];
 
       // Apply filters
       if (filters?.isArchived !== undefined) {
@@ -116,13 +144,14 @@ export class ColumnRepository implements IColumnRepository {
       const columnData = {
         id,
         board_id: column.boardId,
-        title: column.title,
+        title: column.name,
         position: column.position || 0,
         color: column.color || '#6B7280',
         is_collapsed: column.isCollapsed ? 1 : 0,
         task_limit: column.taskLimit || null,
         wip_limit: column.wipLimit || null,
         settings: JSON.stringify(column.settings || {}),
+        created_by: column.createdBy || null,
         is_archived: column.isArchived ? 1 : 0,
         created_at: now.toISOString(),
         updated_at: now.toISOString()
@@ -137,9 +166,9 @@ export class ColumnRepository implements IColumnRepository {
 
   async update(id: string, updates: Partial<Column>): Promise<Column> {
     try {
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, unknown> = {};
 
-      if (updates.title !== undefined) updateData.title = updates.title;
+      if (updates.name !== undefined) updateData.title = updates.name;
       if (updates.position !== undefined) updateData.position = updates.position;
       if (updates.color !== undefined) updateData.color = updates.color;
       if (updates.isCollapsed !== undefined) updateData.is_collapsed = updates.isCollapsed ? 1 : 0;
@@ -245,7 +274,7 @@ export class ColumnRepository implements IColumnRepository {
       const result = await databaseAdapter.queryOne(
         'SELECT COUNT(*) as count FROM tasks WHERE column_id = ? AND is_archived = 0',
         [id]
-      );
+      ) as any;
       return result?.count || 0;
     } catch (error) {
       throw new Error(`Failed to get task count: ${error}`);
@@ -284,20 +313,21 @@ export class ColumnRepository implements IColumnRepository {
     }
   }
 
-  private transformToColumn(row: any): Column {
+  private transformToColumn(row: Record<string, unknown>): Column {
     return {
-      id: row.id,
-      boardId: row.board_id,
-      title: row.title,
-      position: row.position || 0,
-      color: row.color,
+      id: row.id as string,
+      boardId: row.board_id as string,
+      name: row.title as string,
+      position: (row.position as number) || 0,
+      color: row.color as string,
       isCollapsed: Boolean(row.is_collapsed),
-      taskLimit: row.task_limit,
-      wipLimit: row.wip_limit,
-      settings: JSON.parse(row.settings || '{}'),
+      taskLimit: row.task_limit as number,
+      wipLimit: row.wip_limit as number,
+      settings: JSON.parse((row.settings as string) || '{}'),
       isArchived: Boolean(row.is_archived),
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at)
+      createdBy: row.created_by as string,
+      createdAt: new Date(row.created_at as string),
+      updatedAt: new Date(row.updated_at as string)
     };
   }
 }

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Board, CreateBoardData, UpdateBoardData } from '../../../data/types';
-import { Button, LoadingSpinner, ErrorMessage, EmptyState, Pagination } from '../../common';
+import { CreateBoardData, UpdateBoardData } from '../../../data/types';
+import { Button, LoadingSpinner, ErrorMessage, EmptyState, Pagination } from '../common';
 import { useAuth } from '../../context/AuthContext';
 import { useBoards } from '../../hooks/useBoards';
 import BoardCard from './BoardCard';
 import BoardFilters from './BoardFilters';
 import CreateBoardModal from './CreateBoardModal';
+import { DuplicateOptions } from './DuplicateBoardModal';
 import { useDebounce } from '../../hooks/useDebounce';
 
 interface BoardListProps {
@@ -24,7 +25,7 @@ const BoardList: React.FC<BoardListProps> = ({
   
   const {
     boards,
-    totalCount,
+    totalBoards,
     currentPage,
     totalPages,
     isLoading,
@@ -33,16 +34,14 @@ const BoardList: React.FC<BoardListProps> = ({
     filters,
     setFilters,
     resetFilters,
-    goToPage,
-    nextPage,
-    previousPage,
+    setPage,
+    loadBoards,
     createBoard,
     updateBoard,
     deleteBoard,
     archiveBoard,
     restoreBoard,
-    duplicateBoard,
-    refreshBoards
+    duplicateBoard
   } = useBoards({ 
     projectId,
     autoLoad: true,
@@ -100,22 +99,32 @@ const BoardList: React.FC<BoardListProps> = ({
     }
   };
   
-  const handleDuplicateBoard = async (id: string, name: string) => {
+  const handleDuplicateBoard = async (id: string, data: CreateBoardData & { duplicateOptions: DuplicateOptions }) => {
     try {
-      await duplicateBoard(id, name);
+      // Convert DuplicateOptions to Record<string, unknown> for the hook
+      const convertedData = {
+        ...data,
+        duplicateOptions: data.duplicateOptions as unknown as Record<string, unknown>
+      };
+      await duplicateBoard(id, convertedData);
     } catch (error) {
       console.error('Failed to duplicate board:', error);
     }
   };
+
+  // Pagination handlers
+  const goToPage = (page: number) => setPage(page);
+  const nextPage = () => setPage(Math.min(currentPage + 1, totalPages));
+  const previousPage = () => setPage(Math.max(currentPage - 1, 1));
   
-  const canCreateBoard = user && (!projectId || user.permissions?.canCreateBoards);
+  const canCreateBoard = user && (!projectId || user.role === 'admin' || user.role === 'manager');
   
   if (error) {
     return (
       <div className={className}>
         <ErrorMessage 
           message={error}
-          onRetry={refreshBoards}
+          onRetry={loadBoards}
         />
       </div>
     );
@@ -130,8 +139,8 @@ const BoardList: React.FC<BoardListProps> = ({
             {projectId ? 'Project Boards' : 'All Boards'}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            {totalCount > 0 
-              ? `${totalCount} board${totalCount === 1 ? '' : 's'} found`
+            {totalBoards > 0 
+              ? `${totalBoards} board${totalBoards === 1 ? '' : 's'} found`
               : 'No boards found'
             }
           </p>
@@ -142,12 +151,10 @@ const BoardList: React.FC<BoardListProps> = ({
             variant="primary"
             onClick={() => setIsCreateModalOpen(true)}
             disabled={isLoading}
-            icon={
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            }
           >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
             Create Board
           </Button>
         )}
@@ -178,27 +185,18 @@ const BoardList: React.FC<BoardListProps> = ({
           }
           title="No boards found"
           description={
-            filters.search || filters.status || filters.showArchived
+            filters.search || filters.showArchived
               ? "No boards match your current filters. Try adjusting your search criteria."
               : projectId
               ? "This project doesn't have any boards yet. Create your first board to get started."
               : "You don't have any boards yet. Create your first board to start organizing your tasks."
           }
           action={
-            canCreateBoard ? (
-              <Button
-                variant="primary"
-                onClick={() => setIsCreateModalOpen(true)}
-                icon={
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                }
-              >
-                Create Board
-              </Button>
-            ) : undefined
-          }
+              canCreateBoard ? {
+                label: "Create Board",
+                onClick: () => setIsCreateModalOpen(true)
+              } : undefined
+            }
         />
       )}
       
@@ -226,10 +224,6 @@ const BoardList: React.FC<BoardListProps> = ({
                 currentPage={currentPage}
                 totalPages={totalPages}
                 onPageChange={goToPage}
-                onPrevious={previousPage}
-                onNext={nextPage}
-                showPageNumbers
-                maxVisiblePages={5}
               />
             </div>
           )}

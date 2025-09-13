@@ -35,14 +35,14 @@ const priorityOptions: {value: TaskPriority;label: string;color: string;}[] =
 
 const statusLabels: Record<string, string> = {
   "todo": "К выполнению",
-  "in-progress": "В работе",
+  "in_progress": "В работе",
   "review": "На проверке",
   "done": "Выполнено"
 };
 
 const statusColors: Record<string, string> = {
   "todo": "bg-gray-500/20 text-gray-300 border-gray-500/30",
-  "in-progress": "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
+  "in_progress": "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
   "review": "bg-purple-500/20 text-purple-300 border-purple-500/30",
   "done": "bg-emerald-500/25 text-emerald-300 border-emerald-500/40"
 };
@@ -96,7 +96,7 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
   const handleSave = async () => {
     try {
       // Log assignees changes if they occurred
-      const originalAssignees = task.assignees || (task.assignee ? [task.assignee] : []);
+      const originalAssignees = task.assignees || [];
       const newAssignees = editedTask.assignees || [];
       
       const originalNames = originalAssignees.map(a => a.name);
@@ -106,8 +106,8 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
         logTaskAssigneesChanged(
           dispatch,
           task.id,
-          task.boardId,
-          task.projectId,
+          task.board_id || '',
+          task.project_id || '',
           task.title,
           state.currentUser.id,
           state.currentUser.name,
@@ -140,12 +140,20 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
 
     setEditedTask({
       ...editedTask,
-      comments: [...editedTask.comments, comment]
+      comments: [...(editedTask.comments || []), comment]
     });
     setNewComment("");
   };
 
-  const availableUsers = state.selectedProject?.members || [];
+  // Преобразуем ProjectMember[] в User[] для MultiSelect
+  const availableUsers = (state.selectedProject?.members || []).map(member => ({
+    id: member.userId,
+    name: member.userId, // Временно используем userId как name
+    email: '', // Пустой email
+    role: 'user' as const,
+    created_at: '',
+    updated_at: ''
+  }));
 
   return (
     <div
@@ -230,12 +238,11 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
                   Исполнители
                 </label>
                 <MultiSelect
-                  value={editedTask.assignees || (editedTask.assignee ? [editedTask.assignee] : [])}
+                  value={editedTask.assignees || []}
                   onChange={(users) => {
                     setEditedTask({ 
                       ...editedTask, 
-                      assignees: users,
-                      assignee: users.length > 0 ? users[0] : undefined // Keep backward compatibility
+                      assignees: users
                     });
                   }}
                   options={availableUsers}
@@ -278,16 +285,13 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
                 <input
                   type="date"
                   value={
-                  editedTask.deadline ?
-                  editedTask.deadline.toISOString().split("T")[0] :
+                  editedTask.due_date ?
+                  editedTask.due_date.split("T")[0] :
                   ""
                   }
                   onChange={(e) => {
-                    const date = e.target.value ? (() => {
-                      const newDate = new Date(e.target.value);
-                      return isNaN(newDate.getTime()) ? undefined : newDate;
-                    })() : undefined;
-                    setEditedTask({ ...editedTask, deadline: date });
+                    const dateString = e.target.value || undefined;
+                    setEditedTask({ ...editedTask, due_date: dateString });
                   }}
                   className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-primary-500"
                   data-oid="esq072m" />
@@ -463,7 +467,7 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
                   Создано:
                 </span>
                 <p className="text-white" data-oid=":_-upsr">
-                  {formatDate(new Date(editedTask.createdAt))}
+                  {formatDate(new Date(editedTask.created_at))}
                 </p>
               </div>
 
@@ -473,7 +477,7 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
                   Автор:
                 </span>
                 <p className="text-white" data-oid="blsrf4i">
-                  {editedTask.reporter.name}
+                  {state.users.find(u => u.id === editedTask.creator_id)?.name || editedTask.creator_username || 'Неизвестный пользователь'}
                 </p>
               </div>
 
@@ -506,7 +510,7 @@ export function TaskModal({ task, isOpen, onClose, onSave }: TaskModalProps) {
                     accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.zip,.rar"
                   />
                 </div>
-                {editedTask.attachments.length === 0 ?
+                {(editedTask.attachments?.length || 0) === 0 ?
                 <p className="text-sm text-gray-500" data-oid="_-6em6z">
                     Нет вложений
                   </p> :

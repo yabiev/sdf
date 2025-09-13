@@ -1,106 +1,169 @@
-const { Pool } = require('pg');
-const fs = require('fs');
-const path = require('path');
+const puppeteer = require('puppeteer');
 
-function loadEnvFile() {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) {
-    console.error('❌ Файл .env не найден!');
-    return {};
-  }
-
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  const env = {};
+(async () => {
+  console.log('🚀 Начинаем тестирование создания проекта...');
   
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const [key, ...valueParts] = trimmed.split('=');
-      if (key && valueParts.length > 0) {
-        env[key.trim()] = valueParts.join('=').trim().replace(/^["']|["']$/g, '');
+  const browser = await puppeteer.launch({
+    headless: false,
+    defaultViewport: null,
+    args: ['--start-maximized']
+  });
+  
+  const page = await browser.newPage();
+  
+  try {
+    // Переходим на главную страницу
+    console.log('📱 Переходим на http://localhost:3000');
+    await page.goto('http://localhost:3000', { waitUntil: 'networkidle2' });
+    
+    // Ждем загрузки страницы
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Проверяем, нужна ли авторизация
+    const loginButton = await page.$('button[type="submit"]');
+    if (loginButton) {
+      console.log('🔐 Выполняем авторизацию...');
+      
+      // Вводим email
+      const emailInput = await page.$('input[type="email"]');
+      if (emailInput) {
+        await emailInput.click();
+        await emailInput.type('axelencore@mail.ru');
+        console.log('✉️ Email введен');
+      }
+      
+      // Вводим пароль
+      const passwordInput = await page.$('input[type="password"]');
+      if (passwordInput) {
+        await passwordInput.click();
+        await passwordInput.type('Ad580dc6axelencore');
+        console.log('🔑 Пароль введен');
+      }
+      
+      // Нажимаем кнопку входа
+      await loginButton.click();
+      console.log('🚪 Кнопка входа нажата');
+      
+      // Ждем перенаправления
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    
+    // Найти и кликнуть кнопку создания проекта
+    console.log('Ищем кнопку создания проекта...');
+    
+    // Сначала попробуем найти кнопку с плюсом или текстом создания
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Попробуем найти кнопку по различным селекторам
+    let createButton = null;
+    
+    // Вариант 1: поиск кнопки с текстом "Создать проект"
+    createButton = await page.evaluateHandle(() => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      return buttons.find(btn => btn.textContent && btn.textContent.includes('Создать проект'));
+    });
+    
+    if (createButton && createButton.asElement) {
+      createButton = createButton.asElement();
+    } else {
+      createButton = null;
+    }
+    
+    if (!createButton) {
+      // Вариант 2: кнопка с плюсом
+      createButton = await page.$('button[title*="Создать"], button[aria-label*="Создать"]');
+    }
+    
+    if (!createButton) {
+      // Вариант 3: поиск по всем кнопкам
+      const buttons = await page.$$('button');
+      console.log(`Найдено ${buttons.length} кнопок`);
+      
+      for (let i = 0; i < buttons.length; i++) {
+        const buttonText = await buttons[i].evaluate(el => el.textContent?.trim());
+        const buttonTitle = await buttons[i].evaluate(el => el.title || el.getAttribute('aria-label') || '');
+        console.log(`Кнопка ${i}: "${buttonText}" (title: "${buttonTitle}")`);
+        
+        if (buttonText && (buttonText.toLowerCase().includes('создать') || buttonText.toLowerCase().includes('новый') || buttonText.toLowerCase().includes('добавить'))) {
+          createButton = buttons[i];
+          console.log(`Найдена подходящая кнопка: "${buttonText}"`);
+          break;
+        }
       }
     }
-  });
-  
-  return env;
-}
-
-async function testProjectCreation() {
-  const env = loadEnvFile();
-  
-  const config = {
-    host: env.POSTGRES_HOST || 'localhost',
-    port: parseInt(env.POSTGRES_PORT) || 5432,
-    database: env.POSTGRES_DB || 'encore_tasks',
-    user: env.POSTGRES_USER || 'postgres',
-    password: env.POSTGRES_PASSWORD || ''
-  };
-
-  console.log('🔧 Конфигурация подключения:', {
-    host: config.host,
-    port: config.port,
-    database: config.database,
-    user: config.user,
-    password: config.password ? '***' : 'НЕ ЗАДАН'
-  });
-
-  const pool = new Pool(config);
-
-  try {
-    console.log('🔌 Подключение к базе данных...');
-    const client = await pool.connect();
-    console.log('✅ Подключение успешно!');
     
-    // Создаем тестового пользователя
-    console.log('👤 Создание тестового пользователя...');
-    const userResult = await client.query(`
-      INSERT INTO users (email, name, password_hash)
-      VALUES ($1, $2, $3)
-      RETURNING id, email, name
-    `, [
-      'test_project@example.com',
-      'Test User',
-      'test_hash'
-    ]);
-    
-    const userId = userResult.rows[0].id;
-    console.log('✅ Пользователь создан:', userId);
-    
-    // Пробуем создать проект
-    console.log('📁 Создание проекта...');
-    try {
-      const projectResult = await client.query(`
-        INSERT INTO projects (name, description, owner_id)
-        VALUES ($1, $2, $3)
-        RETURNING id, name, description, owner_id, created_at
-      `, [
-        'Test Project',
-        'Test Description',
-        userId
-      ]);
+    if (createButton) {
+      await createButton.click();
+      console.log('Кликнули на кнопку создания проекта');
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      console.log('✅ Проект создан успешно:', projectResult.rows[0]);
+      // Ищем поле ввода названия проекта
+      const nameInput = await page.$('input[placeholder*="название"], input[placeholder*="name"], input[name="name"], input[id="name"]');
       
-      // Очистка
-      await client.query('DELETE FROM projects WHERE owner_id = $1', [userId]);
-      await client.query('DELETE FROM users WHERE id = $1', [userId]);
-      console.log('🧹 Тестовые данные очищены');
+      if (nameInput) {
+        console.log('📝 Вводим название проекта...');
+        const projectName = `Тестовый проект ${Date.now()}`;
+        await nameInput.click();
+        await nameInput.type(projectName);
+        
+        // Ищем кнопку сохранения
+        let saveButton = await page.$('button[type="submit"]');
+        
+        if (!saveButton) {
+          // Поиск кнопки по тексту
+          saveButton = await page.evaluateHandle(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            return buttons.find(btn => {
+              const text = btn.textContent?.toLowerCase() || '';
+              return text.includes('создать') || text.includes('сохранить') || text.includes('добавить');
+            });
+          });
+          
+          if (saveButton && saveButton.asElement) {
+            saveButton = saveButton.asElement();
+          } else {
+            saveButton = null;
+          }
+        }
+        
+        if (saveButton) {
+          console.log('💾 Сохраняем проект...');
+          await saveButton.click();
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          console.log('✅ Проект создан успешно!');
+        } else {
+          console.log('❌ Не найдена кнопка сохранения');
+        }
+      } else {
+        console.log('❌ Не найдено поле ввода названия проекта');
+      }
+    } else {
+      console.log('❌ Кнопка создания проекта не найдена');
       
-    } catch (projectError) {
-      console.error('❌ Ошибка создания проекта:', projectError.message);
-      console.error('📋 Детали ошибки:', projectError);
-      
-      // Очистка пользователя в случае ошибки
-      await client.query('DELETE FROM users WHERE id = $1', [userId]);
+      // Выводим структуру страницы для отладки
+      const pageContent = await page.content();
+      console.log('📄 Содержимое страницы (первые 1000 символов):');
+      console.log(pageContent.substring(0, 1000));
     }
     
-    client.release();
+    // Получаем логи консоли
+    console.log('\n📋 Логи консоли браузера:');
+    const logs = await page.evaluate(() => {
+      return window.console._logs || [];
+    });
+    
+    // Слушаем события консоли
+    page.on('console', msg => {
+      console.log(`🖥️ Console ${msg.type()}: ${msg.text()}`);
+    });
+    
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
   } catch (error) {
-    console.error('❌ Ошибка подключения:', error.message);
-    console.error('📋 Детали ошибки:', error);
+    console.error('❌ Ошибка при тестировании:', error);
   } finally {
-    await pool.end();
+    console.log('🏁 Завершение тестирования...');
+    await browser.close();
   }
-}
-
-testProjectCreation().catch(console.error);
+})();

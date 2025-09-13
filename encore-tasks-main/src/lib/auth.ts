@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import jwt from 'jsonwebtoken';
 import { DatabaseAdapter } from './database-adapter';
+
 const databaseAdapter = DatabaseAdapter.getInstance();
 
 interface AuthResult {
@@ -16,11 +17,20 @@ interface AuthResult {
 
 export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
   try {
+    // Отладка: показать все cookies
+    console.log('=== DEBUG COOKIES ===');
+    console.log('All cookies:', request.cookies.getAll());
+    console.log('Cookie names:', request.cookies.getAll().map(c => c.name));
+    console.log('auth-token cookie:', request.cookies.get('auth-token'));
+    console.log('auth-token-client cookie:', request.cookies.get('auth-token-client'));
+    console.log('Authorization header:', request.headers.get('authorization'));
+    
     // Получение токена из cookie или заголовка Authorization
     const token = request.cookies.get('auth-token')?.value || 
                   request.headers.get('authorization')?.replace('Bearer ', '');
 
     console.log('Auth token found:', !!token);
+    console.log('Token value (first 20 chars):', token ? token.substring(0, 20) + '...' : 'null');
     if (!token) {
       console.log('No auth token found in cookies or headers');
       return {
@@ -31,8 +41,10 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
 
     // Проверка JWT токена
     let decoded: any;
+    const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+    console.log('Using JWT_SECRET:', jwtSecret);
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+      decoded = jwt.verify(token, jwtSecret);
       console.log('JWT verified successfully for user:', decoded.userId);
     } catch (jwtError) {
       console.log('JWT verification failed:', jwtError);
@@ -50,7 +62,7 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
          const session = await databaseAdapter.getSessionByToken(token);
          console.log('Session found:', !!session);
          console.log('Session object:', session);
-         console.log('Session userId:', session?.userId);
+         console.log('Session userId:', session?.user_id);
 
          if (!session) {
            console.log('Session not found or expired for token');
@@ -58,7 +70,7 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
          }
 
        // Получаем пользователя через адаптер
-       const user = await databaseAdapter.getUserById(session.userId);
+       const user = await databaseAdapter.getUserById(session.user_id);
 
       if (!user) {
         return { success: false, error: 'Пользователь не найден' };
@@ -122,7 +134,7 @@ export async function verifyProjectAccess(
      }
 
      // Проверяем, является ли пользователь владельцем
-     if (project.createdBy === userId) {
+     if (project.created_by === userId) {
        return { hasAccess: true, userRole: 'owner' };
      }
 

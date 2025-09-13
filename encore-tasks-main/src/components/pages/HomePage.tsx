@@ -25,31 +25,31 @@ export function HomePage({ onNavigate }: HomePageProps) {
   
   // Filter tasks for current user only
   const userTasks = state.tasks.filter((task) => 
-    task.assignees?.some(a => a.id === state.currentUser?.id) || task.assignee?.id === state.currentUser?.id
+    task.assignees?.some(a => a.id === state.currentUser?.id)
   );
   
   const todayTasks = userTasks.filter((task) => {
-    const taskDate = new Date(task.createdAt);
+    const taskDate = new Date(task.created_at);
     return taskDate.toDateString() === today.toDateString();
   });
 
   const completedTasks = userTasks.filter((task) => task.status === "done");
   const inProgressTasks = userTasks.filter(
-    (task) => task.status === "in-progress"
+    (task) => task.status === "in_progress"
   );
   const overdueTasks = userTasks.filter((task) => {
-    if (!task.deadline) return false;
-    return new Date(task.deadline) < today && task.status !== "done";
+    if (!task.due_date) return false;
+    return new Date(task.due_date) < today && task.status !== "done";
   });
 
   const dueSoonTasks = userTasks.filter((task) => {
-    if (!task.deadline) return false;
-    const days = getDaysUntilDeadline(task.deadline);
+    if (!task.due_date) return false;
+    const days = getDaysUntilDeadline(new Date(task.due_date));
     return days <= 3 && days >= 0 && task.status !== "done";
   });
 
   const myTasks = state.tasks.filter(
-    (task) => task.assignees?.some(a => a.id === state.currentUser?.id) || task.assignee?.id === state.currentUser?.id
+    (task) => task.assignees?.some(a => a.id === state.currentUser?.id)
   );
 
   const handleTaskClick = (task: any) => {
@@ -187,14 +187,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     {task.title}
                   </p>
                   <p className="text-gray-400 text-xs" data-oid="zar8w_a">
-                    {task.assignee?.name || "Не назначено"}
+                    {task.assignees?.[0]?.name || "Не назначено"}
                   </p>
                 </div>
                 <div
                 className={`px-2 py-1 rounded text-xs ${
                 task.status === "done" ?
                 "bg-green-500/20 text-green-400" :
-                task.status === "in-progress" ?
+                task.status === "in_progress" ?
                   "bg-yellow-500/20 text-yellow-400" :
                 "bg-gray-500/20 text-gray-400"}`
                 }
@@ -202,7 +202,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
                   {task.status === "done" ?
                 "Выполнено" :
-                task.status === "in-progress" ?
+                task.status === "in_progress" ?
                   "В работе" : "К выполнению"}
                 </div>
               </div>
@@ -259,16 +259,16 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     {task.title}
                   </p>
                   <p className="text-gray-400 text-xs" data-oid="99pmkc:">
-                    {task.deadline &&
+                    {task.due_date &&
                   <>
                         {overdueTasks.includes(task) ? "Просрочено" : "Срок"}:{" "}
-                        {!isNaN(new Date(task.deadline).getTime()) ? formatDate(new Date(task.deadline)) : 'Неверная дата'}
+                        {!isNaN(new Date(task.due_date).getTime()) ? formatDate(new Date(task.due_date)) : 'Неверная дата'}
                       </>
                   }
                   </p>
                 </div>
                 <div className="text-xs text-gray-400" data-oid="-7wwd.a">
-                  {task.assignee?.name || "Не назначено"}
+                  {task.assignees?.[0]?.name || "Не назначено"}
                 </div>
               </div>
             )}
@@ -299,7 +299,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
           {state.projects.map((project) => {
             const projectTasks = state.tasks.filter(
-              (t) => t.projectId === project.id
+              (t) => t.project_id === project.id
             );
             const completedCount = projectTasks.filter(
               (t) => t.status === "done"
@@ -367,7 +367,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                       data-oid="tcatz1.">
 
                       <Users className="w-3 h-3" data-oid="i23xaso" />
-                      {project.members.length}
+                      {project.members?.length || 0}
                     </span>
                   </div>
                 </div>

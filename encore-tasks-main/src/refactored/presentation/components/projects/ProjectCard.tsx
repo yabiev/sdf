@@ -2,8 +2,8 @@
 // Displays a single project in card format with actions
 
 import React, { useState } from 'react';
-import { Project } from '../../../data/types';
-import { formatDate, getInitials } from '../../../lib/utils';
+import { Project, UpdateProjectData } from '../../../data/types';
+import { formatDate, getInitials } from '../../utils';
 import { DropdownMenu } from '../common/DropdownMenu';
 import { Badge } from '../common/Badge';
 import { Avatar } from '../common/Avatar';
@@ -77,8 +77,8 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     setIsRestoreDialogOpen(false);
   };
 
-  const handleUpdateProject = (updates: Partial<Project>) => {
-    onUpdate(updates);
+  const handleUpdateProject = async (id: string, data: UpdateProjectData) => {
+    onUpdate(data);
     setIsEditModalOpen(false);
   };
 
@@ -138,7 +138,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                   {project.name}
                 </h3>
                 {project.isArchived && (
-                  <Badge variant="secondary" size="sm">
+                  <Badge variant="warning" size="sm">
                     Archived
                   </Badge>
                 )}
@@ -217,9 +217,9 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               {project.members.slice(0, 5).map((member, index) => (
                 <Avatar
                   key={member.userId}
-                  src={member.avatar}
-                  alt={member.name}
-                  fallback={getInitials(member.name)}
+                  src={undefined}
+                  alt={member.userId}
+                  initials={getInitials(member.userId)}
                   size="sm"
                   className="ring-2 ring-white dark:ring-gray-800"
                 />
@@ -238,7 +238,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
             <span>Updated {formatDate(project.updatedAt)}</span>
             {project.statistics?.overdueTasks > 0 && (
-              <Badge variant="danger" size="sm">
+              <Badge variant="error" size="sm">
                 {project.statistics.overdueTasks} overdue
               </Badge>
             )}
@@ -261,7 +261,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         onClose={() => setIsDeleteDialogOpen(false)}
         onConfirm={confirmDelete}
         title="Delete Project"
-        message={`Are you sure you want to delete "${project.name}"? This action cannot be undone and will delete all boards and tasks in this project.`}
+        message={`Are you sure you want to delete &quot;${project.name}&quot;? This action cannot be undone and will delete all boards and tasks in this project.`}
         confirmLabel="Delete"
         variant="danger"
       />
@@ -271,7 +271,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         onClose={() => setIsArchiveDialogOpen(false)}
         onConfirm={confirmArchive}
         title="Archive Project"
-        message={`Are you sure you want to archive "${project.name}"? Archived projects are hidden from the main view but can be restored later.`}
+        message={`Are you sure you want to archive &quot;${project.name}&quot;? Archived projects are hidden from the main view but can be restored later.`}
         confirmLabel="Archive"
         variant="warning"
       />
@@ -281,7 +281,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         onClose={() => setIsRestoreDialogOpen(false)}
         onConfirm={confirmRestore}
         title="Restore Project"
-        message={`Are you sure you want to restore "${project.name}"? This will make the project visible in the main view again.`}
+        message={`Are you sure you want to restore &quot;${project.name}&quot;? This will make the project visible in the main view again.`}
         confirmLabel="Restore"
         variant="primary"
       />

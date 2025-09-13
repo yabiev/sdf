@@ -92,7 +92,7 @@ async function initDatabase() {
               role = $2,
               name = $3
             WHERE email = $4
-          `, [passwordHash, 'admin', 'Admin User', 'axelencore@mail.ru']);
+          `, [passwordHash, 'ADMIN', 'Admin User', 'axelencore@mail.ru']);
           
           console.log('✓ Admin user updated successfully');
         } else {
@@ -100,7 +100,7 @@ async function initDatabase() {
           await pool.query(`
             INSERT INTO users (name, email, password_hash, role)
             VALUES ($1, $2, $3, $4)
-          `, ['Admin User', 'axelencore@mail.ru', passwordHash, 'admin']);
+          `, ['Admin User', 'axelencore@mail.ru', passwordHash, 'ADMIN']);
           
           console.log('✓ Admin user created successfully');
         }

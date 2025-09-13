@@ -9,7 +9,7 @@ import {
   PaginationParams,
   PaginatedResponse
 } from '../../data/types';
-import { ServiceFactory } from '../../business/services';
+import { ClientServiceFactory } from '../../business/services/index.client';
 import { useAuth } from '../context/AuthContext';
 
 interface UseProjectsFilters {
@@ -65,7 +65,7 @@ interface UseProjectsReturn {
 }
 
 const defaultFilters: UseProjectsFilters = {
-  sortBy: 'updated_at',
+  sortBy: 'updatedAt',
   sortOrder: 'desc',
   showArchived: false
 };
@@ -73,7 +73,7 @@ const defaultFilters: UseProjectsFilters = {
 export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn => {
   const { autoLoad = true, pageSize = 12 } = options;
   const { user } = useAuth();
-  const projectService = ServiceFactory.getProjectService();
+  const projectService = ClientServiceFactory.getProjectService();
   
   // State
   const [projects, setProjects] = useState<Project[]>([]);
@@ -108,13 +108,18 @@ export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn
         limit: pageSize
       };
       
-      const response: PaginatedResponse<Project> = await projectService.getProjects({
-        ...filters,
-        pagination
-      });
+      const allProjects = await projectService.getByUserId(
+        user?.id || '',
+        filters
+      );
       
-      setProjects(response.data);
-      setTotalCount(response.total);
+      // Handle pagination manually
+      const startIndex = (currentPage - 1) * pageSize;
+      const endIndex = startIndex + pageSize;
+      const paginatedProjects = allProjects.slice(startIndex, endIndex);
+      
+      setProjects(paginatedProjects);
+      setTotalCount(allProjects.length);
     } catch (err) {
       console.error('Error loading projects:', err);
       setError('Failed to load projects. Please try again.');
@@ -168,10 +173,28 @@ export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn
     setError(null);
     
     try {
-      const newProject = await projectService.createProject(data);
+      const projectData = {
+        ...data,
+        color: data.color || '#3B82F6',
+        ownerId: user?.id || '',
+        isArchived: false,
+        settings: {
+          isPublic: false,
+          allowGuestAccess: false,
+          defaultTaskPriority: 'medium' as const,
+          autoArchiveCompletedTasks: false,
+          enableTimeTracking: false,
+          enableDependencies: false
+        }
+      };
+      const newProject = await projectService.create(projectData, user?.id || '');
       
       // Add to local state if it matches current filters
-      if (!filters.status || newProject.status === filters.status) {
+      const matchesStatusFilter = !filters.status || 
+        (filters.status === 'active' && !newProject.isArchived) ||
+        (filters.status === 'archived' && newProject.isArchived);
+      
+      if (matchesStatusFilter) {
         setProjects(prev => [newProject, ...prev]);
         setTotalCount(prev => prev + 1);
       }
@@ -192,7 +215,7 @@ export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn
     setError(null);
     
     try {
-      const updatedProject = await projectService.updateProject(id, data);
+      const updatedProject = await projectService.update(id, data, user?.id || '');
       
       // Update local state
       setProjects(prev => 
@@ -217,7 +240,7 @@ export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn
     setError(null);
     
     try {
-      await projectService.deleteProject(id);
+      await projectService.delete(id, user?.id || '');
       
       // Remove from local state
       setProjects(prev => prev.filter(project => project.id !== id));
@@ -236,13 +259,13 @@ export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn
     setError(null);
     
     try {
-      await projectService.archiveProject(id);
+      await projectService.archive(id, user?.id || '');
       
       // Update local state
       setProjects(prev => 
         prev.map(project => 
           project.id === id 
-            ? { ...project, isArchived: true, updatedAt: new Date().toISOString() }
+            ? { ...project, isArchived: true, updatedAt: new Date() }
             : project
         )
       );
@@ -258,13 +281,13 @@ export const useProjects = (options: UseProjectsOptions = {}): UseProjectsReturn
     setError(null);
     
     try {
-      await projectService.restoreProject(id);
+      await projectService.restore(id, user?.id || '');
       
       // Update local state
       setProjects(prev => 
         prev.map(project => 
           project.id === id 
-            ? { ...project, isArchived: false, updatedAt: new Date().toISOString() }
+            ? { ...project, isArchived: false, updatedAt: new Date() }
             : project
         )
       );

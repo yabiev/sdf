@@ -7,7 +7,11 @@
  */
 
 import { IDatabaseAdapter } from '../../lib/database-adapter.interface';
-import { TaskId, UserId, ProjectId, BoardId } from '../../types/board.types';
+import {
+  TaskId,
+  UserId,
+  ProjectId
+} from '../../refactored/data/types';
 
 export interface TaskPermissions {
   canView: boolean;
@@ -31,7 +35,7 @@ export class TaskPermissionService {
         FROM tasks t
         JOIN boards b ON t.board_id = b.id
         JOIN projects p ON b.project_id = p.id
-        WHERE t.id = ?
+        WHERE t.id = $1
       `;
       
       const taskResult = await this.databaseAdapter.query(taskQuery, [taskId]);
@@ -51,7 +55,7 @@ export class TaskPermissionService {
       // Проверяем членство в проекте
       const memberQuery = `
         SELECT role FROM project_members 
-        WHERE project_id = ? AND user_id = ?
+        WHERE project_id = $1 AND user_id = $2
       `;
       
       const memberResult = await this.databaseAdapter.query(memberQuery, [task.project_id, userId]);
@@ -60,7 +64,7 @@ export class TaskPermissionService {
       // Проверяем, является ли пользователь исполнителем задачи
       const assigneeQuery = `
         SELECT 1 FROM task_assignees 
-        WHERE task_id = ? AND user_id = ?
+        WHERE task_id = $1 AND user_id = $2
       `;
       
       const assigneeResult = await this.databaseAdapter.query(assigneeQuery, [taskId, userId]);
@@ -193,7 +197,7 @@ export class TaskPermissionService {
 
       // Проверяем владение проектом
       const ownerQuery = `
-        SELECT creator_id FROM projects WHERE id = ?
+        SELECT creator_id FROM projects WHERE id = $1
       `;
       
       const ownerResult = await this.databaseAdapter.query(ownerQuery, [projectId]);
@@ -211,7 +215,7 @@ export class TaskPermissionService {
       // Проверяем членство в проекте
       const memberQuery = `
         SELECT role FROM project_members 
-        WHERE project_id = ? AND user_id = ?
+        WHERE project_id = $1 AND user_id = $2
       `;
       
       const memberResult = await this.databaseAdapter.query(memberQuery, [projectId, userId]);

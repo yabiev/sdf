@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { DatabaseAdapter } from '@/lib/database-adapter';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { v4 as uuidv4 } from 'uuid';
-import databaseAdapter from '@/lib/database-adapter-optimized';
+
+const databaseAdapter = DatabaseAdapter.getInstance();
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,10 +41,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Хеширование пароля
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
     // Создание пользователя с правильной структурой данных
     // Для обычных пользователей isApproved = false - требуется одобрение администратора
     // Администраторы могут одобрить пользователей через админ панель
-    const user = await databaseAdapter.createUser(email, password, name, 'user');
+    const user = await databaseAdapter.createUser({
+      email,
+      password_hash: hashedPassword,
+      name,
+      role: 'user',
+      isApproved: false
+    });
 
     // Возврат данных пользователя (без пароля) с правильной типизацией
     const userResult = {
@@ -52,10 +62,10 @@ export async function POST(request: NextRequest) {
       name: user.name,
       email: user.email,
       role: user.role,
-      approval_status: user.approval_status || 'pending',
+      approval_status: user.isApproved ? 'approved' : 'pending',
       isApproved: user.isApproved,
-      avatar: user.avatar_url,
-      createdAt: user.createdAt
+      avatar: user.avatar,
+      createdAt: user.created_at
     };
 
     // НЕ создаем сессию для неподтвержденных пользователей

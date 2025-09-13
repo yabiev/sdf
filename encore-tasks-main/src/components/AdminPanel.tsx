@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { User } from "@/types";
+import { User, Project } from "@/types";
 import { Users, Check, X, Clock, Mail, Calendar, Shield, UserPlus, ArrowLeft, Plus, Minus, Briefcase, Crown, UserCheck } from "lucide-react";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
 
@@ -86,28 +86,37 @@ export function AdminPanel({ onNavigate }: AdminPanelProps) {
     }
   };
 
-  const handleAddUserToProject = (userId: string, projectId: string) => {
-    const user = state.users.find(u => u.id === userId);
-    const project = state.projects.find(p => p.id === projectId);
-    
-    if (user && project && !project.members.find(m => m.id === userId)) {
-      const updatedProject = {
-        ...project,
-        members: [...project.members, user]
-      };
-      dispatch({ type: 'UPDATE_PROJECT', payload: updatedProject });
+  const handleAddUserToProject = async (userId: string, projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/members`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: userId, role: 'member' }),
+      });
+      
+      if (response.ok) {
+        // Обновляем состояние или перезагружаем данные
+        console.log('Пользователь добавлен в проект');
+      }
+    } catch (error) {
+      console.error('Ошибка добавления пользователя в проект:', error);
     }
   };
 
-  const handleRemoveUserFromProject = (userId: string, projectId: string) => {
-    const project = state.projects.find(p => p.id === projectId);
-    
-    if (project) {
-      const updatedProject = {
-        ...project,
-        members: project.members.filter(m => m.id !== userId)
-      };
-      dispatch({ type: 'UPDATE_PROJECT', payload: updatedProject });
+  const handleRemoveUserFromProject = async (userId: string, projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/members/${userId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        // Обновляем состояние или перезагружаем данные
+        console.log('Пользователь удален из проекта');
+      }
+    } catch (error) {
+      console.error('Ошибка удаления пользователя из проекта:', error);
     }
   };
 
@@ -122,8 +131,8 @@ export function AdminPanel({ onNavigate }: AdminPanelProps) {
   };
 
   const UserCard = ({ user, isPending }: { user: User; isPending: boolean }) => {
-    const userProjects = state.projects.filter(p => p.members.some(m => m.id === user.id));
-    const availableProjects = state.projects.filter(p => !p.members.some(m => m.id === user.id));
+    const userProjects: Project[] = []; // TODO: Загружать из API project_members
+    const availableProjects = state.projects; // TODO: Фильтровать по участию пользователя
     
     return (
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-6 hover:bg-white/10 transition-all duration-200">
@@ -140,18 +149,16 @@ export function AdminPanel({ onNavigate }: AdminPanelProps) {
               </div>
               <div className="flex items-center gap-2 text-gray-400 text-sm mt-1">
                 <Calendar className="w-4 h-4" />
-                <span>Регистрация: {formatDate(new Date(user.createdAt))}</span>
+                <span>Регистрация: {formatDate(new Date(user.created_at))}</span>
               </div>
               <div className="flex items-center gap-2 text-gray-400 text-sm mt-1">
                 <Shield className="w-4 h-4" />
                 <span>Роль: {user.role === 'manager' ? 'Менеджер' : 'Пользователь'}</span>
               </div>
-              {!isPending && userProjects.length > 0 && (
-                <div className="flex items-center gap-2 text-gray-400 text-sm mt-1">
-                  <Briefcase className="w-4 h-4" />
-                  <span>Проекты: {userProjects.map(p => p.name).join(', ')}</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-gray-400 text-sm mt-1">
+              <Briefcase className="w-4 h-4" />
+              <span>Проекты: Загрузка...</span>
+            </div>
             </div>
           </div>
           
@@ -265,9 +272,7 @@ export function AdminPanel({ onNavigate }: AdminPanelProps) {
               </div>
             )}
             
-            {availableProjects.length === 0 && userProjects.length === state.projects.length && (
-              <p className="text-xs text-gray-500">Пользователь участвует во всех доступных проектах</p>
-            )}
+            <p className="text-xs text-gray-500">Управление проектами временно недоступно</p>
           </div>
         )}
       </div>

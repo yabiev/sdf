@@ -17,19 +17,20 @@ import {
 } from '../../types/board.types';
 
 import { IColumnRepository } from '../interfaces/column.service.interface';
+import { DatabaseAdapter } from '../../lib/database-adapter';
 
 /**
  * Реализация репозитория колонок для работы с базой данных
  */
 export class ColumnRepository implements IColumnRepository {
-  constructor(private readonly databaseAdapter: any) {}
+  constructor(private readonly databaseAdapter: DatabaseAdapter) {}
 
   async findById(id: ColumnId): Promise<Column | null> {
     try {
       const query = `
         SELECT 
           id,
-          name as title,
+          title,
           board_id as boardId,
           color,
           position,
@@ -62,27 +63,25 @@ export class ColumnRepository implements IColumnRepository {
       let query = `
         SELECT 
           id,
-          name as title,
+          title,
           board_id as boardId,
           color,
           position,
           wip_limit as wipLimit,
           is_collapsed as isCollapsed,
           settings,
-          created_by as createdBy,
-          updated_by as updatedBy,
           created_at as createdAt,
           updated_at as updatedAt
         FROM columns 
         WHERE board_id = ?
       `;
       
-      const params: any[] = [boardId];
+      const params: unknown[] = [boardId];
       
       // Применяем фильтры
       if (filters) {
         if (filters.search) {
-          query += ' AND name LIKE ?';
+          query += ' AND title LIKE ?';
           params.push(`%${filters.search}%`);
         }
         
@@ -109,7 +108,7 @@ export class ColumnRepository implements IColumnRepository {
       
       const results = await this.databaseAdapter.query(query, params);
       
-      return results.map((row: any) => this.mapRowToColumn(row));
+      return results.map((row: Record<string, unknown>) => this.mapRowToColumn(row));
     } catch (error) {
       console.error('Error finding columns by board:', error);
       throw new Error(`Failed to find columns: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -121,22 +120,20 @@ export class ColumnRepository implements IColumnRepository {
       let query = `
         SELECT 
           id,
-          name as title,
+          title,
           board_id as boardId,
           color,
           position,
           wip_limit as wipLimit,
           is_collapsed as isCollapsed,
           settings,
-          created_by as createdBy,
-          updated_by as updatedBy,
           created_at as createdAt,
           updated_at as updatedAt
         FROM columns 
         WHERE 1=1
       `;
       
-      const params: any[] = [];
+      const params: unknown[] = [];
       
       // Применяем фильтры
       if (filters) {
@@ -146,7 +143,7 @@ export class ColumnRepository implements IColumnRepository {
         }
         
         if (filters.search) {
-          query += ' AND name LIKE ?';
+          query += ' AND title LIKE ?';
           params.push(`%${filters.search}%`);
         }
         
@@ -190,7 +187,7 @@ export class ColumnRepository implements IColumnRepository {
       }
       
       const results = await this.databaseAdapter.query(query, params);
-      const columns = results.map((row: any) => this.mapRowToColumn(row));
+      const columns = results.map((row: Record<string, unknown>) => this.mapRowToColumn(row));
       
       const totalPages = pagination ? Math.ceil(total / pagination.limit) : 1;
       const currentPage = pagination?.page || 1;
@@ -220,7 +217,7 @@ export class ColumnRepository implements IColumnRepository {
       
       const query = `
         INSERT INTO columns (
-          id, name, board_id, color, position, 
+          id, title, board_id, color, position, 
           is_collapsed, settings, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
@@ -251,36 +248,39 @@ export class ColumnRepository implements IColumnRepository {
     }
   }
 
-  async update(id: ColumnId, columnData: UpdateColumnDto, updatedBy: UserId): Promise<Column | null> {
+  async update(id: ColumnId, data: UpdateColumnDto): Promise<Column | null> {
     try {
       const updateFields: string[] = [];
-      const params: any[] = [];
+      const params: unknown[] = [];
       
-      if (columnData.title !== undefined) {
-        updateFields.push('name = ?');
-        params.push(columnData.title);
+      if (data.title !== undefined) {
+        updateFields.push('title = ?');
+        params.push(data.title);
       }
       
-      if (columnData.color !== undefined) {
+      if (data.color !== undefined) {
         updateFields.push('color = ?');
-        params.push(columnData.color);
+        params.push(data.color);
       }
       
-      if (columnData.position !== undefined) {
+      if (data.position !== undefined) {
         updateFields.push('position = ?');
-        params.push(columnData.position);
+        params.push(data.position);
       }
       
-
+      if (data.wipLimit !== undefined) {
+        updateFields.push('wip_limit = ?');
+        params.push(data.wipLimit);
+      }
       
-      if (columnData.isCollapsed !== undefined) {
+      if (data.isCollapsed !== undefined) {
         updateFields.push('is_collapsed = ?');
-        params.push(columnData.isCollapsed ? 1 : 0);
+        params.push(data.isCollapsed ? 1 : 0);
       }
       
-      if (columnData.settings !== undefined) {
+      if (data.settings !== undefined) {
         updateFields.push('settings = ?');
-        params.push(columnData.settings ? JSON.stringify(columnData.settings) : null);
+        params.push(data.settings ? JSON.stringify(data.settings) : null);
       }
       
       if (updateFields.length === 0) {
@@ -365,8 +365,8 @@ export class ColumnRepository implements IColumnRepository {
 
   async existsByTitle(title: string, boardId: BoardId, excludeId?: ColumnId): Promise<boolean> {
     try {
-      let query = 'SELECT COUNT(*) as count FROM columns WHERE name = ? AND board_id = ?';
-      const params: any[] = [title, boardId];
+      let query = 'SELECT COUNT(*) as count FROM columns WHERE title = ? AND board_id = ?';
+      const params: unknown[] = [title, boardId];
       
       if (excludeId) {
         query += ' AND id != ?';
@@ -469,7 +469,7 @@ export class ColumnRepository implements IColumnRepository {
     }
   }
 
-  private mapRowToColumn(row: any): Column {
+  private mapRowToColumn(row: Record<string, unknown>): Column {
     return {
       id: row.id,
       title: row.title,
@@ -479,8 +479,6 @@ export class ColumnRepository implements IColumnRepository {
       wipLimit: row.wipLimit,
       isCollapsed: Boolean(row.isCollapsed),
       settings: row.settings ? JSON.parse(row.settings) : {},
-      createdBy: row.createdBy,
-      updatedBy: row.updatedBy,
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt)
     };

@@ -9,6 +9,8 @@ interface ApiResponse<T> {
 class ApiClient {
   private baseUrl: string;
   private csrfToken: string | null = null;
+  private csrfInitialized: boolean = false;
+  private csrfInitPromise: Promise<void> | null = null;
 
   constructor() {
     // In browser environment, always use current origin
@@ -18,27 +20,31 @@ class ApiClient {
     } else {
       this.baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
     }
-    
-    // Initialize CSRF only in browser environment
-    if (typeof window !== 'undefined') {
-      this.initializeCSRF();
-    }
   }
 
   private async initializeCSRF(): Promise<void> {
-    try {
-      // Get CSRF token from server
-      const response = await fetch(`${this.baseUrl}/api/csrf`, {
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        this.csrfToken = data.csrfToken;
-      }
-    } catch (error) {
-      console.warn('Failed to initialize CSRF token:', error);
+    if (this.csrfInitialized || this.csrfInitPromise) {
+      return this.csrfInitPromise || Promise.resolve();
     }
+
+    this.csrfInitPromise = (async () => {
+      try {
+        // Get CSRF token from server
+        const response = await fetch(`${this.baseUrl}/api/csrf`, {
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          this.csrfToken = data.csrfToken;
+          this.csrfInitialized = true;
+        }
+      } catch (error) {
+        console.warn('Failed to initialize CSRF token:', error);
+      }
+    })();
+
+    return this.csrfInitPromise;
   }
 
   private getAuthToken(): string | null {
@@ -46,7 +52,7 @@ class ApiClient {
     
     // Используем только cookie для безопасности (защита от XSS)
     const cookies = document.cookie.split(';');
-    const authCookie = cookies.find(cookie => cookie.trim().startsWith('auth-token-client='));
+    const authCookie = cookies.find(cookie => cookie.trim().startsWith('auth-token='));
     if (authCookie) {
       return authCookie.split('=')[1];
     }
@@ -84,10 +90,12 @@ class ApiClient {
     retries: number = 3
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}/api${endpoint}`;
+    console.log(`🌐 API Request: ${options.method || 'GET'} ${url}`);
     
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const token = this.getAuthToken();
+        console.log(`🔑 Auth token found: ${token ? 'Yes' : 'No'}`);
         
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
@@ -101,6 +109,10 @@ class ApiClient {
 
         // Add CSRF token for state-changing requests
         if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method?.toUpperCase() || 'GET')) {
+          // Ensure CSRF token is initialized before making the request
+          if (typeof window !== 'undefined') {
+            await this.initializeCSRF();
+          }
           const csrfToken = this.getCSRFToken();
           if (csrfToken) {
             headers['X-CSRF-Token'] = csrfToken;
@@ -118,6 +130,7 @@ class ApiClient {
         });
         
         clearTimeout(timeoutId);
+        console.log(`📡 API Response: ${response.status} ${response.statusText}`);
 
         // Handle different response types
         let data;
@@ -127,6 +140,7 @@ class ApiClient {
         } else {
           data = { message: await response.text() };
         }
+        console.log(`📦 Response data:`, data);
 
         if (!response.ok) {
           // Handle specific HTTP errors
@@ -340,9 +354,21 @@ class ApiClient {
     allowAttachments?: boolean;
     autoArchive?: boolean;
   }) {
+    // Преобразуем camelCase в snake_case для API
+    const apiData = {
+      name: boardData.name,
+      description: boardData.description,
+      project_id: boardData.projectId, // Преобразуем projectId в project_id
+      visibility: boardData.visibility,
+      color: boardData.color,
+      allowComments: boardData.allowComments,
+      allowAttachments: boardData.allowAttachments,
+      autoArchive: boardData.autoArchive
+    };
+    
     return this.request<{ board: any }>('/boards', {
       method: 'POST',
-      body: JSON.stringify(boardData),
+      body: JSON.stringify(apiData),
     });
   }
 
@@ -452,9 +478,23 @@ class ApiClient {
     estimatedHours?: number;
     tags?: string[];
   }) {
+    // Преобразуем camelCase в snake_case для API
+    const apiData = {
+      title: taskData.title,
+      description: taskData.description,
+      status: taskData.status,
+      priority: taskData.priority,
+      assignee_id: taskData.assigneeId,
+      column_id: taskData.columnId,
+      position: taskData.position,
+      due_date: taskData.dueDate,
+      estimated_hours: taskData.estimatedHours,
+      tags: taskData.tags
+    };
+    
     return this.request<{ task: any }>('/tasks', {
       method: 'POST',
-      body: JSON.stringify(taskData),
+      body: JSON.stringify(apiData),
     });
   }
 
@@ -514,15 +554,16 @@ export interface Project {
   name: string;
   description?: string;
   color: string;
+  icon_url?: string;
   isPrivate: boolean;
   isArchived: boolean;
   archivedAt?: string;
-  createdBy: string;
+  created_by: string;
   creatorName: string;
   membersCount: number;
   tasksCount: number;
   boardsCount: number;
-  createdAt: string;
+  created_at: string;
   updatedAt: string;
 }
 

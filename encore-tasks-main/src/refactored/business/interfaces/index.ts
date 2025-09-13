@@ -1,12 +1,8 @@
 // Business Layer Interfaces for Refactored Architecture
 // These interfaces define contracts for all business operations
 
-import {
-  Project, Board, Task, User, Column,
-  TaskDependency, TimeEntry, Comment, Attachment,
-  SearchFilters, SortOptions, PaginationOptions,
-  ValidationResult, ApiResponse, SystemEvent
-} from '../../data/types';
+import { Project, Board, Task, User, Comment, Attachment, TaskDependency, SearchFilters, ValidationResult, Column, TimeEntry, SystemEvent, TaskAction } from '../../data/types';
+import { SortOptions, PaginationOptions } from '../../../types/core.types';
 
 // Repository Interfaces
 export interface IProjectRepository {
@@ -24,6 +20,7 @@ export interface IProjectRepository {
   addMember(projectId: string, member: Project['members'][0]): Promise<void>;
   removeMember(projectId: string, userId: string): Promise<void>;
   updateMemberRole(projectId: string, userId: string, role: Project['members'][0]['role']): Promise<void>;
+  checkPermissions(projectId: string, userId: string, permission: string): Promise<boolean>;
 }
 
 export interface IBoardRepository {
@@ -39,6 +36,9 @@ export interface IBoardRepository {
   reorderBoards(projectId: string, boardIds: string[]): Promise<void>;
   duplicate(id: string, newName: string): Promise<Board>;
   getStatistics(id: string): Promise<Board['statistics']>;
+  search(query: string, projectId?: string, filters?: SearchFilters): Promise<Board[]>;
+  getRecentlyViewed(userId: string, limit?: number): Promise<Board[]>;
+  markAsViewed(boardId: string, userId: string): Promise<void>;
 }
 
 export interface IColumnRepository {
@@ -56,8 +56,8 @@ export interface ITaskRepository {
   findByColumnId(columnId: string, includeArchived?: boolean): Promise<Task[]>;
   findByBoardId(boardId: string, includeArchived?: boolean): Promise<Task[]>;
   findByProjectId(projectId: string, includeArchived?: boolean): Promise<Task[]>;
-  findByAssigneeId(assigneeId: string, filters?: SearchFilters): Promise<Task[]>;
-  findAll(filters?: SearchFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<Task[]>;
+  findByAssigneeId(assigneeId: string, includeArchived?: boolean): Promise<Task[]>;
+  findAll(includeArchived?: boolean, sort?: SortOptions, pagination?: PaginationOptions): Promise<Task[]>;
   create(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task>;
   update(id: string, updates: Partial<Task>): Promise<Task>;
   delete(id: string): Promise<void>;
@@ -68,17 +68,31 @@ export interface ITaskRepository {
   reorderTasks(columnId: string, taskIds: string[]): Promise<void>;
   duplicate(id: string, newTitle: string): Promise<Task>;
   search(query: string, filters?: SearchFilters): Promise<Task[]>;
+  addComment(taskId: string, comment: { content: string; authorId: string }): Promise<void>;
+  updateComment(commentId: string, updates: Partial<Comment>): Promise<Comment>;
+  deleteComment(commentId: string): Promise<void>;
+  addAttachment(taskId: string, attachment: Omit<Attachment, 'id' | 'createdAt' | 'updatedAt' | 'taskId' | 'uploadedBy'>, uploadedBy: string): Promise<Attachment>;
+  deleteAttachment(attachmentId: string): Promise<void>;
+  addDependency(taskId: string, dependency: Omit<TaskDependency, 'id' | 'createdAt' | 'createdBy'>, createdBy: string): Promise<TaskDependency>;
+  removeDependency(dependencyId: string): Promise<void>;
+  startTimeTracking(taskId: string, userId: string): Promise<TimeEntry>;
+  stopTimeTracking(entryId: string): Promise<TimeEntry>;
+  getTimeEntries(taskId: string): Promise<TimeEntry[]>;
+  addTimeEntry(taskId: string, timeEntry: Omit<TimeEntry, 'id' | 'createdAt' | 'updatedAt' | 'taskId'>): Promise<TimeEntry>;
+  updateTimeEntry(entryId: string, updates: Partial<TimeEntry>): Promise<TimeEntry>;
+  deleteTimeEntry(entryId: string): Promise<void>;
+  logAction(taskId: string, action: Omit<TaskAction, 'id' | 'createdAt'>): Promise<TaskAction>;
 }
 
 export interface IUserRepository {
   findById(id: string): Promise<User | null>;
   findByEmail(email: string): Promise<User | null>;
   findAll(filters?: SearchFilters): Promise<User[]>;
-  create(user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User>;
+  create(user: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User>;
   update(id: string, updates: Partial<User>): Promise<User>;
   delete(id: string): Promise<void>;
   updateLastLogin(id: string): Promise<void>;
-  updatePreferences(id: string, preferences: Partial<User['preferences']>): Promise<User>;
+
 }
 
 // Service Interfaces
@@ -95,7 +109,7 @@ export interface IProjectService {
   removeMember(projectId: string, memberId: string, userId: string): Promise<void>;
   updateMemberRole(projectId: string, memberId: string, role: Project['members'][0]['role'], userId: string): Promise<void>;
   getStatistics(id: string, userId: string): Promise<Project['statistics']>;
-  checkPermissions(projectId: string, userId: string): Promise<Project['members'][0]['permissions']>;
+  checkPermissions(projectId: string, userId: string, permission: string): Promise<boolean>;
 }
 
 export interface IBoardService {
@@ -134,7 +148,7 @@ export interface ITaskService {
   unassign(id: string, userId: string): Promise<Task>;
   updateStatus(id: string, status: Task['status'], userId: string): Promise<Task>;
   updatePriority(id: string, priority: Task['priority'], userId: string): Promise<Task>;
-  addComment(taskId: string, content: string, userId: string): Promise<Comment>;
+  addComment(taskId: string, content: string, userId: string): Promise<void>;
   updateComment(commentId: string, content: string, userId: string): Promise<Comment>;
   deleteComment(commentId: string, userId: string): Promise<void>;
   addAttachment(taskId: string, attachmentData: Omit<Attachment, 'id' | 'createdAt' | 'updatedAt' | 'taskId' | 'uploadedBy'>, userId: string): Promise<Attachment>;
@@ -150,41 +164,52 @@ export interface ITaskService {
 export interface IUserService {
   getById(id: string): Promise<User>;
   getByEmail(email: string): Promise<User>;
-  create(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'lastLoginAt'>): Promise<User>;
+  create(userData: Omit<User, 'id' | 'created_at' | 'updated_at'>): Promise<User>;
   update(id: string, updates: Partial<User>): Promise<User>;
   delete(id: string): Promise<void>;
-  updatePreferences(id: string, preferences: Partial<User['preferences']>): Promise<User>;
   updateLastLogin(id: string): Promise<void>;
-  search(query: string): Promise<User[]>;
 }
 
 // Validator Interfaces
 export interface IProjectValidator {
-  validateCreate(data: any): ValidationResult;
-  validateUpdate(data: any): ValidationResult;
-  validateMember(data: any): ValidationResult;
+  validateCreate(data: unknown): ValidationResult;
+  validateUpdate(data: unknown): ValidationResult;
+  validateMember(data: unknown): ValidationResult;
+  validateId(id: string): ValidationResult;
+  validateSearchFilters(filters: unknown): ValidationResult;
+  validateSortOptions(sort: unknown): ValidationResult;
+  validatePaginationOptions(pagination: unknown): ValidationResult;
 }
 
 export interface IBoardValidator {
-  validateCreate(data: any): ValidationResult;
-  validateUpdate(data: any): ValidationResult;
-  validateColumn(data: any): ValidationResult;
+  validateCreate(data: unknown): ValidationResult;
+  validateUpdate(data: unknown): ValidationResult;
+  validateColumn(data: unknown): ValidationResult;
+  validateId(id: string): ValidationResult;
+  validateSearchFilters(filters: unknown): ValidationResult;
+  validateSortOptions(sort: unknown): ValidationResult;
+  validatePaginationOptions(pagination: unknown): ValidationResult;
 }
 
 export interface ITaskValidator {
-  validateCreate(data: any): ValidationResult;
-  validateUpdate(data: any): ValidationResult;
-  validateMove(data: any): ValidationResult;
-  validateDependency(data: any): ValidationResult;
-  validateComment(data: any): ValidationResult;
-  validateAttachment(data: any): ValidationResult;
+  validateCreate(data: unknown): ValidationResult;
+  validateUpdate(data: unknown): ValidationResult;
+  validateMove(data: unknown): ValidationResult;
+  validateDependency(data: unknown): ValidationResult;
+  validateComment(data: unknown): ValidationResult;
+  validateAttachment(data: unknown): ValidationResult;
+  validateId(id: string): ValidationResult;
+  validateSearchFilters(filters: unknown): ValidationResult;
+  validateSortOptions(sort: unknown): ValidationResult;
+  validatePaginationOptions(pagination: unknown): ValidationResult;
 }
 
 export interface IUserValidator {
-  validateCreate(data: any): ValidationResult;
-  validateUpdate(data: any): ValidationResult;
+  validateCreate(data: unknown): ValidationResult;
+  validateUpdate(data: unknown): ValidationResult;
   validateEmail(email: string): ValidationResult;
   validatePassword(password: string): ValidationResult;
+  validateId(id: string): ValidationResult;
 }
 
 // Permission Interfaces
@@ -214,16 +239,16 @@ export interface IEventService {
 // Cache Interfaces
 export interface ICacheService {
   get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T, ttl?: number): Promise<void>;
+  set(key: string, value: unknown, ttl?: number): Promise<void>;
   delete(key: string): Promise<void>;
-  clear(pattern?: string): Promise<void>;
-  invalidateByTags(tags: string[]): Promise<void>;
+  clear(): Promise<void>;
+  exists(key: string): Promise<boolean>;
 }
 
 // Notification Interfaces
 export interface INotificationService {
   sendEmail(to: string, subject: string, content: string): Promise<void>;
-  sendPush(userId: string, title: string, body: string, data?: Record<string, any>): Promise<void>;
+  sendPush(userId: string, title: string, body: string, data?: Record<string, unknown>): Promise<void>;
   sendTelegram(userId: string, message: string): Promise<void>;
   notifyTaskAssigned(task: Task, assignee: User, assigner: User): Promise<void>;
   notifyTaskCompleted(task: Task, completer: User): Promise<void>;
@@ -237,7 +262,7 @@ export interface ISearchService {
   searchProjects(query: string, userId: string, filters?: SearchFilters): Promise<Project[]>;
   searchBoards(query: string, userId: string, filters?: SearchFilters): Promise<Board[]>;
   searchUsers(query: string, userId: string): Promise<User[]>;
-  indexEntity(entityType: string, entityId: string, data: Record<string, any>): Promise<void>;
+  indexEntity(entityType: string, entityId: string, data: Record<string, unknown>): Promise<void>;
   removeFromIndex(entityType: string, entityId: string): Promise<void>;
 }
 
@@ -252,11 +277,11 @@ export interface IImportExportService {
 
 // Analytics Interfaces
 export interface IAnalyticsService {
-  getProjectAnalytics(projectId: string, userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, any>>;
-  getBoardAnalytics(boardId: string, userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, any>>;
-  getUserAnalytics(userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, any>>;
-  getTaskCompletionTrends(projectId: string, userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, any>>;
-  getProductivityMetrics(userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, any>>;
+  getProjectAnalytics(projectId: string, userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, unknown>>;
+  getBoardAnalytics(boardId: string, userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, unknown>>;
+  getUserAnalytics(userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, unknown>>;
+  getTaskCompletionTrends(projectId: string, userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, unknown>>;
+  getProductivityMetrics(userId: string, period: 'day' | 'week' | 'month' | 'year'): Promise<Record<string, unknown>>;
 }
 
 // Factory Interfaces
@@ -276,23 +301,17 @@ export interface ITaskFactory {
   createAttachment(data: Partial<Attachment>, taskId: string, userId: string): Attachment;
   createDependency(taskId: string, dependsOnTaskId: string, type: TaskDependency['type'], userId: string): TaskDependency;
   createTimeEntry(taskId: string, userId: string): TimeEntry;
-  createTaskAction(taskId: string, userId: string, action: Task['history'][0]['action'], oldValue?: any, newValue?: any): Task['history'][0];
+  createTaskAction(taskId: string, userId: string, action: Task['history'][0]['action'], oldValue?: unknown, newValue?: unknown): Task['history'][0];
 }
 
 // Database Adapter Interface
 export interface IDatabaseAdapter {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  execute(sql: string, params?: unknown[]): Promise<{ affectedRows: number; insertId?: string }>;
+  transaction<T>(callback: (adapter: IDatabaseAdapter) => Promise<T>): Promise<T>;
   beginTransaction(): Promise<void>;
-  commitTransaction(): Promise<void>;
-  rollbackTransaction(): Promise<void>;
-  query<T = any>(sql: string, params?: any[]): Promise<T[]>;
-  queryOne<T = any>(sql: string, params?: any[]): Promise<T | null>;
-  insert<T = any>(table: string, data: Record<string, any>): Promise<T>;
-  update<T = any>(table: string, id: string, data: Record<string, any>): Promise<T>;
-  delete(table: string, id: string): Promise<void>;
-  createIndex(table: string, columns: string[], unique?: boolean): Promise<void>;
-  dropIndex(table: string, indexName: string): Promise<void>;
-  migrate(version: number): Promise<void>;
-  seed(): Promise<void>;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
 }

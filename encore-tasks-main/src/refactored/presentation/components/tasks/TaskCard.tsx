@@ -1,8 +1,8 @@
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { Task, UpdateTaskData, TaskStatus, TaskPriority } from '../../../data/types';
-import { AuthContext } from '../../contexts/AuthContext';
-import { Button, Badge, Avatar, Dropdown, ConfirmDialog } from '../../common';
-import { EditTaskModal } from './EditTaskModal';
+import { useAuth } from '../../context/AuthContext';
+import { Button, Badge, Avatar, DropdownMenu, ConfirmDialog } from '../common';
+import EditTaskModal from './EditTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
 
 interface TaskCardProps {
@@ -28,7 +28,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   showProject = false,
   className = ''
 }) => {
-  const { user } = useContext(AuthContext);
+  const { user } = useAuth();
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -36,16 +36,12 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const [isUpdating, setIsUpdating] = useState(false);
 
   const canEdit = user && (
-    user.id === task.createdBy ||
-    user.role === 'admin' ||
-    user.role === 'manager' ||
+    user.id === task.reporterId ||
     task.assignees?.some(assignee => assignee.id === user.id)
   );
 
   const canDelete = user && (
-    user.id === task.createdBy ||
-    user.role === 'admin' ||
-    user.role === 'manager'
+    user.id === task.reporterId
   );
 
   const handleStatusChange = async (status: TaskStatus) => {
@@ -199,7 +195,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           </div>
           
           {actionItems.length > 0 && (
-            <Dropdown
+            <DropdownMenu
               trigger={
                 <Button
                   variant="ghost"
@@ -217,7 +213,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
         {/* Status and Priority */}
         <div className="flex items-center gap-2 mb-3">
           {canEdit ? (
-            <Dropdown
+            <DropdownMenu
               trigger={
                 <Badge className={`cursor-pointer ${getStatusColor(task.status)}`}>
                   {task.status.replace('_', ' ')}
@@ -225,10 +221,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
               }
               items={statusOptions.map(option => ({
                 label: option.label,
-                onClick: () => handleStatusChange(option.value as TaskStatus),
+                onClick: isUpdating ? undefined : () => handleStatusChange(option.value as TaskStatus),
                 className: task.status === option.value ? 'bg-blue-50 dark:bg-blue-900' : ''
               }))}
-              disabled={isUpdating}
             />
           ) : (
             <Badge className={getStatusColor(task.status)}>
@@ -237,7 +232,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           )}
           
           {canEdit ? (
-            <Dropdown
+            <DropdownMenu
               trigger={
                 <Badge className={`cursor-pointer ${getPriorityColor(task.priority)}`}>
                   {getPriorityIcon(task.priority)} {task.priority}
@@ -245,10 +240,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
               }
               items={priorityOptions.map(option => ({
                 label: option.label,
-                onClick: () => handlePriorityChange(option.value as TaskPriority),
+                onClick: isUpdating ? undefined : () => handlePriorityChange(option.value as TaskPriority),
                 className: task.priority === option.value ? 'bg-blue-50 dark:bg-blue-900' : ''
               }))}
-              disabled={isUpdating}
             />
           ) : (
             <Badge className={getPriorityColor(task.priority)}>
@@ -280,8 +274,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
               {task.assignees.slice(0, 3).map((assignee) => (
                 <Avatar
                   key={assignee.id}
-                  user={assignee}
-                  size="xs"
+                  src={assignee.avatar}
+                  alt={assignee.name}
+                  initials={assignee.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                  size="sm"
                   className="border-2 border-white dark:border-gray-800"
                 />
               ))}
@@ -376,8 +372,6 @@ const TaskCard: React.FC<TaskCardProps> = ({
           task={task}
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
-          onUpdate={onUpdate}
-          canEdit={canEdit}
         />
       )}
 
@@ -388,8 +382,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
         onConfirm={handleDelete}
         title="Delete Task"
         message={`Are you sure you want to delete "${task.title}"? This action cannot be undone.`}
-        confirmText="Delete"
-        confirmVariant="danger"
+        confirmLabel="Delete"
+        variant="danger"
       />
 
       <ConfirmDialog
@@ -402,8 +396,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
             ? `Are you sure you want to restore "${task.title}"?`
             : `Are you sure you want to archive "${task.title}"? Archived tasks are hidden from normal views.`
         }
-        confirmText={task.isArchived ? 'Restore' : 'Archive'}
-        confirmVariant={task.isArchived ? 'primary' : 'warning'}
+        confirmLabel={task.isArchived ? 'Restore' : 'Archive'}
+        variant={task.isArchived ? 'primary' : 'warning'}
       />
     </>
   );

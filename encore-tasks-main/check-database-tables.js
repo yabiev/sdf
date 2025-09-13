@@ -1,94 +1,62 @@
 const { Pool } = require('pg');
+require('dotenv').config();
 
-// Database connection
-const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'encore_tasks',
-  password: 'postgres',
-  port: 5432,
-});
+async function checkDatabaseTables() {
+  const pool = new Pool({
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME || 'encore_tasks',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD || 'postgres',
+    ssl: process.env.DB_SSL === 'true'
+  });
 
-async function checkDatabase() {
   try {
-    console.log('Checking database tables...');
+    console.log('🔍 Проверка таблиц в базе данных...');
     
-    // List all tables
-    const tablesResult = await pool.query(`
+    // Получаем список всех таблиц
+    const tablesQuery = `
       SELECT table_name 
       FROM information_schema.tables 
-      WHERE table_schema = 'public'
-      ORDER BY table_name
-    `);
+      WHERE table_schema = 'public' 
+      ORDER BY table_name;
+    `;
     
-    console.log('Available tables:');
-    tablesResult.rows.forEach(row => {
-      console.log('- ' + row.table_name);
-    });
+    const result = await pool.query(tablesQuery);
     
-    if (tablesResult.rows.length === 0) {
-      console.log('No tables found in the database!');
-      return;
+    console.log('📋 Найденные таблицы:');
+    if (result.rows.length === 0) {
+      console.log('❌ Таблицы не найдены');
+    } else {
+      result.rows.forEach((row, index) => {
+        console.log(`${index + 1}. ${row.table_name}`);
+      });
     }
     
-    // Check if users table exists
-    const usersTableExists = tablesResult.rows.some(row => row.table_name === 'users');
+    // Проверяем конкретные таблицы, которые нужны для приложения
+    const requiredTables = ['users', 'user_sessions', 'projects', 'tasks', 'comments', 'tags'];
     
-    if (usersTableExists) {
-      console.log('\nUsers table structure:');
-      const columnsResult = await pool.query(`
-        SELECT column_name, data_type, is_nullable, column_default
-        FROM information_schema.columns
-        WHERE table_name = 'users'
-        ORDER BY ordinal_position
-      `);
+    console.log('\n🔍 Проверка обязательных таблиц:');
+    for (const tableName of requiredTables) {
+      const checkQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = $1
+        );
+      `;
       
-      columnsResult.rows.forEach(col => {
-        console.log(`- ${col.column_name}: ${col.data_type} (nullable: ${col.is_nullable})`);
-      });
+      const checkResult = await pool.query(checkQuery, [tableName]);
+      const exists = checkResult.rows[0].exists;
       
-      // Count users
-      const countResult = await pool.query('SELECT COUNT(*) FROM users');
-      console.log(`\nTotal users: ${countResult.rows[0].count}`);
-      
-      // Show sample users
-      const sampleResult = await pool.query('SELECT id, email, role, approval_status FROM users LIMIT 5');
-      console.log('\nSample users:');
-      sampleResult.rows.forEach(user => {
-        console.log(`- ID: ${user.id}, Email: ${user.email}, Role: ${user.role}, Status: ${user.approval_status}`);
-      });
-    } else {
-      console.log('\nUsers table does not exist!');
-    }
-    
-    // Check sessions table
-    const sessionsTableExists = tablesResult.rows.some(row => row.table_name === 'sessions');
-    
-    if (sessionsTableExists) {
-      console.log('\nSessions table structure:');
-      const sessionsColumnsResult = await pool.query(`
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns
-        WHERE table_name = 'sessions'
-        ORDER BY ordinal_position
-      `);
-      
-      sessionsColumnsResult.rows.forEach(col => {
-        console.log(`- ${col.column_name}: ${col.data_type} (nullable: ${col.is_nullable})`);
-      });
-      
-      // Count sessions
-      const sessionsCountResult = await pool.query('SELECT COUNT(*) FROM sessions');
-      console.log(`\nTotal sessions: ${sessionsCountResult.rows[0].count}`);
-    } else {
-      console.log('\nSessions table does not exist!');
+      console.log(`${exists ? '✅' : '❌'} ${tableName}: ${exists ? 'существует' : 'отсутствует'}`);
     }
     
   } catch (error) {
-    console.error('Database check failed:', error.message);
+    console.error('❌ Ошибка проверки таблиц:', error);
   } finally {
     await pool.end();
   }
 }
 
-checkDatabase();
+checkDatabaseTables();

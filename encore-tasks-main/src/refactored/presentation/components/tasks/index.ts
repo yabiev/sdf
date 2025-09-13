@@ -13,6 +13,6 @@ export type {
   TaskStatus,
   TaskPriority,
   TaskComment,
-  TaskAttachment,
+  Attachment,
   TaskStatistics
 } from '../../../data/types';

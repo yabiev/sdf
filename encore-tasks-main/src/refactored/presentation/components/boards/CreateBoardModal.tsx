@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { CreateBoardData } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select } from '../../common';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { Input } from '../common/Input';
+import { Textarea } from '../common/Textarea';
+import { Select } from '../common/Select';
 import { BoardValidator } from '../../../business/validators';
 import { useProjects } from '../../hooks/useProjects';
 
@@ -55,14 +59,14 @@ const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
     // Validate name
     const nameValidation = BoardValidator.validateName(formData.name);
     if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.errors[0];
+      newErrors.name = nameValidation.errors[0].message;
     }
 
     // Validate description (optional)
     if (formData.description) {
       const descValidation = BoardValidator.validateDescription(formData.description);
       if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
+        newErrors.description = descValidation.errors[0].message;
       }
     }
 
@@ -72,7 +76,7 @@ const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
     } else {
       const projectValidation = BoardValidator.validateProjectId(formData.projectId);
       if (!projectValidation.isValid) {
-        newErrors.projectId = projectValidation.errors[0];
+        newErrors.projectId = projectValidation.errors[0].message;
       }
     }
 
@@ -210,7 +214,7 @@ const CreateBoardModal: React.FC<CreateBoardModalProps> = ({
                 Default Columns
               </p>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Your new board will be created with default columns: "To Do", "In Progress", and "Done". You can customize these after creation.
+                Your new board will be created with default columns: &quot;To Do&quot;, &quot;In Progress&quot;, and &quot;Done&quot;. You can customize these after creation.
               </p>
             </div>
           </div>

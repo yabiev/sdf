@@ -1,6 +1,6 @@
 import React from 'react';
 import { ProjectStatus, ProjectSortBy, SortOrder } from '../../../data/types';
-import { Button, Select, Input } from '../../common';
+import { Button, Select, Input } from '../common';
 
 interface ProjectFiltersProps {
   filters: {
@@ -44,7 +44,7 @@ const ProjectFilters: React.FC<ProjectFiltersProps> = ({
     filters.status ||
     filters.search ||
     filters.showArchived ||
-    (filters.sortBy && filters.sortBy !== 'updated_at') ||
+    (filters.sortBy && filters.sortBy !== 'updatedAt') ||
     (filters.sortOrder && filters.sortOrder !== 'desc');
 
   return (
@@ -146,7 +146,7 @@ const ProjectFilters: React.FC<ProjectFiltersProps> = ({
             
             {filters.search && (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                Search: "{filters.search}"
+                Search: &quot;{filters.search}&quot;
                 <button
                   onClick={() => onFiltersChange({ search: undefined })}
                   className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-green-200 dark:hover:bg-green-800"
@@ -178,4 +178,5 @@ const ProjectFilters: React.FC<ProjectFiltersProps> = ({
   );
 };
 
+export { ProjectFilters };
 export default ProjectFilters;

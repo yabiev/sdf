@@ -9,7 +9,7 @@ import {
   PaginationParams,
   PaginatedResponse
 } from '../../data/types';
-import { BoardService } from '../../business/services';
+import { boardService } from '../../business/services';
 import { useDebounce } from './useDebounce';
 
 interface UseBoardsOptions {
@@ -48,7 +48,7 @@ interface UseBoardsReturn {
   deleteBoard: (id: string) => Promise<void>;
   archiveBoard: (id: string) => Promise<void>;
   restoreBoard: (id: string) => Promise<void>;
-  duplicateBoard: (id: string, data: CreateBoardData & { duplicateOptions: any }) => Promise<Board>;
+  duplicateBoard: (id: string, data: CreateBoardData & { duplicateOptions: Record<string, unknown> }) => Promise<Board>;
   
   // Filter and sort actions
   setFilters: (filters: Partial<BoardFilters>) => void;
@@ -103,12 +103,16 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
   const debouncedSearch = useDebounce(filters.search, 300);
   
   // Memoized pagination params
-  const paginationParams = useMemo((): PaginationParams => ({
+  const paginationParams = useMemo(() => ({
     page: currentPage,
-    pageSize,
-    sortField,
-    sortOrder
-  }), [currentPage, pageSize, sortField, sortOrder]);
+    limit: pageSize
+  }), [currentPage, pageSize]);
+  
+  // Memoized sort options
+  const sortOptions = useMemo(() => ({
+    field: sortField,
+    order: sortOrder
+  }), [sortField, sortOrder]);
   
   // Memoized effective filters (with debounced search)
   const effectiveFilters = useMemo((): BoardFilters => ({
@@ -122,16 +126,22 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      const response: PaginatedResponse<Board> = await BoardService.getBoards(
+      const paginationOptions = {
+        page: paginationParams.page || 1,
+        limit: paginationParams.limit || 10
+      };
+      
+      const boards: Board[] = await boardService.getAll(
         effectiveFilters,
-        paginationParams
+        undefined,
+        paginationOptions
       );
       
-      setBoards(response.data);
-      setTotalBoards(response.total);
-      setTotalPages(response.totalPages);
-      setCurrentPage(response.currentPage);
-    } catch (err) {
+      setBoards(boards);
+      setTotalBoards(boards.length);
+      setTotalPages(Math.ceil(boards.length / (paginationParams.limit || 10)));
+      setCurrentPage(paginationParams.page || 1);
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load boards';
       setError(errorMessage);
       console.error('Error loading boards:', err);
@@ -146,7 +156,43 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      const newBoard = await BoardService.createBoard(data);
+      // Convert CreateBoardData to the format expected by boardService.create
+      const boardData: Omit<Board, 'id' | 'createdAt' | 'updatedAt'> = {
+        name: data.name,
+        description: data.description,
+        projectId: data.projectId,
+        color: data.color || '#3B82F6',
+        position: 0,
+        isArchived: false,
+        settings: {
+          allowTaskCreation: true,
+          autoMoveCompletedTasks: false,
+          enableWipLimits: false
+        },
+        columns: [],
+        statistics: {
+          totalTasks: 0,
+          completedTasks: 0,
+          totalColumns: 0,
+          overdueTasks: 0,
+          tasksByStatus: {
+            todo: 0,
+            in_progress: 0,
+            review: 0,
+            done: 0,
+            blocked: 0
+          },
+          tasksByPriority: {
+            low: 0,
+            medium: 0,
+            high: 0,
+            urgent: 0
+          },
+          averageCompletionTime: 0
+        }
+      };
+      
+      const newBoard = await boardService.create(boardData);
       
       // Add to current list if it matches filters
       if ((!effectiveFilters.projectId || newBoard.projectId === effectiveFilters.projectId) &&
@@ -158,7 +204,7 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
       }
       
       return newBoard;
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to create board';
       setError(errorMessage);
       throw err;
@@ -173,14 +219,14 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      const updatedBoard = await BoardService.updateBoard(id, data);
+      const updatedBoard = await boardService.update(id, data);
       
       setBoards(prev => prev.map(board => 
         board.id === id ? updatedBoard : board
       ));
       
       return updatedBoard;
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update board';
       setError(errorMessage);
       throw err;
@@ -195,11 +241,11 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      await BoardService.deleteBoard(id);
+      await boardService.delete(id);
       
       setBoards(prev => prev.filter(board => board.id !== id));
       setTotalBoards(prev => prev - 1);
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to delete board';
       setError(errorMessage);
       throw err;
@@ -213,7 +259,7 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      await BoardService.archiveBoard(id);
+      await boardService.archive(id);
       
       if (effectiveFilters.showArchived) {
         // Update the board in place if showing archived
@@ -225,7 +271,7 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
         setBoards(prev => prev.filter(board => board.id !== id));
         setTotalBoards(prev => prev - 1);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to archive board';
       setError(errorMessage);
       throw err;
@@ -237,7 +283,7 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      await BoardService.restoreBoard(id);
+      await boardService.restore(id);
       
       if (effectiveFilters.showArchived) {
         // Update the board in place if showing archived
@@ -249,7 +295,7 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
         setBoards(prev => prev.filter(board => board.id !== id));
         setTotalBoards(prev => prev - 1);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to restore board';
       setError(errorMessage);
       throw err;
@@ -259,13 +305,13 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
   // Duplicate board
   const duplicateBoard = useCallback(async (
     id: string, 
-    data: CreateBoardData & { duplicateOptions: any }
+    data: CreateBoardData & { duplicateOptions: Record<string, unknown> }
   ): Promise<Board> => {
     setIsDuplicating(true);
     setError(null);
     
     try {
-      const duplicatedBoard = await BoardService.duplicateBoard(id, data);
+      const duplicatedBoard = await boardService.duplicate(id, data.name, 'current-user-id');
       
       // Add to current list if it matches filters
       if ((!effectiveFilters.projectId || duplicatedBoard.projectId === effectiveFilters.projectId) &&
@@ -277,7 +323,7 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
       }
       
       return duplicatedBoard;
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to duplicate board';
       setError(errorMessage);
       throw err;
@@ -291,12 +337,12 @@ export const useBoards = (options: UseBoardsOptions = {}): UseBoardsReturn => {
     setError(null);
     
     try {
-      const updatedBoard = await BoardService.getBoardById(id);
+      const updatedBoard = await boardService.getById(id, 'current-user-id');
       
       setBoards(prev => prev.map(board => 
         board.id === id ? updatedBoard : board
       ));
-    } catch (err) {
+    } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to refresh board';
       setError(errorMessage);
       console.error('Error refreshing board:', err);

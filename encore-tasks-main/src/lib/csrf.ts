@@ -10,11 +10,12 @@ const CSRF_COOKIE_NAME = 'csrf-token';
  */
 export function generateCSRFToken(): string {
   // Check if we're in Node.js environment
-  if (typeof require !== 'undefined') {
+  if (typeof process !== 'undefined' && process.versions?.node) {
     try {
-      const nodeCrypto = require('crypto');
-      if (nodeCrypto && typeof nodeCrypto.randomBytes === 'function') {
-        return nodeCrypto.randomBytes(CSRF_TOKEN_LENGTH).toString('hex');
+      // Use dynamic import for Node.js crypto
+      const crypto = eval('require("crypto")');
+      if (crypto && typeof crypto.randomBytes === 'function') {
+        return crypto.randomBytes(CSRF_TOKEN_LENGTH).toString('hex');
       }
     } catch (e) {
       // Fall through to Web Crypto API

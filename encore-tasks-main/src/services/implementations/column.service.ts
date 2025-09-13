@@ -11,14 +11,8 @@ import {
   CreateColumnDto,
   UpdateColumnDto,
   ColumnFilters,
-  SortOptions,
-  PaginationOptions,
-  PaginatedResponse,
-  ServiceResponse,
-  ColumnEvent,
-  ColumnStatistics,
-  ColumnTemplate
-} from '../../types/board.types';
+  PaginationOptions
+} from '../../refactored/data/types';
 
 import {
   IColumnService,
@@ -49,7 +43,7 @@ export class ColumnService implements IColumnService {
     private readonly templateService?: IColumnTemplateService
   ) {}
 
-  async getById(id: ColumnId, userId: UserId): Promise<ServiceResponse<Column>> {
+  async getById(id: ColumnId): Promise<ServiceResponse<Column>> {
     try {
       // Проверяем кэш
       if (this.cacheService) {
@@ -88,7 +82,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async getByBoardId(boardId: BoardId, userId: UserId, filters?: ColumnFilters): Promise<ServiceResponse<Column[]>> {
+  async getByBoardId(boardId: BoardId, filters?: ColumnFilters): Promise<ServiceResponse<Column[]>> {
     try {
       const columns = await this.repository.findByBoardId(boardId, filters);
       
@@ -104,7 +98,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async getAll(userId: UserId, filters?: ColumnFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<ServiceResponse<PaginatedResponse<Column>>> {
+  async getAll(filters?: ColumnFilters, sort?: SortOptions, pagination?: PaginationOptions): Promise<ServiceResponse<PaginatedResponse<Column>>> {
     try {
       const result = await this.repository.findAll(filters, sort, pagination);
       
@@ -390,7 +384,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async reorder(boardId: BoardId, columnOrders: Array<{ id: ColumnId; position: number }>, userId: UserId): Promise<ServiceResponse<boolean>> {
+  async reorder(boardId: BoardId, columnOrders: Array<{ id: ColumnId; position: number }>): Promise<ServiceResponse<boolean>> {
     try {
       // Валидация
       const validation = await this.validator.validateReorder(boardId, columnOrders);
@@ -436,7 +430,7 @@ export class ColumnService implements IColumnService {
 
       // Инвалидируем кэш
       if (this.cacheService) {
-        await this.cacheService.invalidateBoard(boardId);
+        await this.cacheService.invalidateBoardColumns(boardId);
         for (const order of columnOrders) {
           await this.cacheService.invalidate(order.id);
         }
@@ -467,7 +461,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async duplicate(id: ColumnId, newTitle: string, userId: UserId): Promise<ServiceResponse<Column>> {
+  async duplicate(id: ColumnId, newTitle: string, userId: string): Promise<ServiceResponse<Column>> {
     try {
       // Валидация
       const validation = await this.validator.validateDuplicate(id, newTitle);
@@ -549,7 +543,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async getStatistics(id: ColumnId, userId: UserId): Promise<ServiceResponse<ColumnStatistics>> {
+  async getStatistics(id: ColumnId): Promise<ServiceResponse<ColumnStatistics>> {
     try {
       const statistics = await this.analyticsService.getColumnStatistics(id);
       
@@ -565,7 +559,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async getEvents(id: ColumnId, userId: UserId, limit?: number): Promise<ServiceResponse<ColumnEvent[]>> {
+  async getEvents(id: ColumnId, limit?: number): Promise<ServiceResponse<ColumnEvent[]>> {
     try {
       const events = await this.eventService.getColumnEvents(id, limit);
       
@@ -581,7 +575,7 @@ export class ColumnService implements IColumnService {
     }
   }
 
-  async createFromTemplate(templateId: string, boardId: BoardId, userId: UserId): Promise<ServiceResponse<Column>> {
+  async createFromTemplate(templateId: string, boardId: BoardId, userId: string): Promise<ServiceResponse<Column>> {
     try {
       if (!this.templateService) {
         return {
@@ -616,7 +610,7 @@ export class ColumnService implements IColumnService {
         };
       }
 
-      const column = await this.factory.createFromTemplate({
+      const column = await this.factory.createColumnFromTemplate({
         ...template,
         boardId
       }, userId);

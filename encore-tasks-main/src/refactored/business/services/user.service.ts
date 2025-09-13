@@ -6,8 +6,7 @@ import {
   User,
   SearchFilters,
   SortOptions,
-  PaginationOptions,
-  ValidationResult
+  PaginationOptions
 } from '../../data/types';
 import { userRepository } from '../../data/repositories';
 import { UserValidator } from '../validators';
@@ -24,55 +23,44 @@ export class UserService implements IUserService {
     this.validator = validator;
   }
 
-  async getById(id: string): Promise<User | null> {
+  async getById(id: string): Promise<User> {
     const validation = this.validator.validateId(id);
     if (!validation.isValid) {
       throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findById(id);
+    const user = await this.repository.findById(id);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    return user;
   }
 
-  async getByEmail(email: string): Promise<User | null> {
+  async getByEmail(email: string): Promise<User> {
     const validation = this.validator.validateEmail(email);
     if (!validation.isValid) {
       throw new Error(`Invalid email: ${validation.errors.join(', ')}`);
     }
 
-    return await this.repository.findByEmail(email);
+    const user = await this.repository.findByEmail(email);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    return user;
   }
 
-  async getAll(
+  async findAll(
     filters?: SearchFilters,
     sort?: SortOptions,
     pagination?: PaginationOptions
   ): Promise<User[]> {
-    if (filters) {
-      const validation = this.validator.validateSearchFilters(filters);
-      if (!validation.isValid) {
-        throw new Error(`Invalid search filters: ${validation.errors.join(', ')}`);
-      }
-    }
-
-    if (sort) {
-      const validation = this.validator.validateSortOptions(sort);
-      if (!validation.isValid) {
-        throw new Error(`Invalid sort options: ${validation.errors.join(', ')}`);
-      }
-    }
-
-    if (pagination) {
-      const validation = this.validator.validatePaginationOptions(pagination);
-      if (!validation.isValid) {
-        throw new Error(`Invalid pagination options: ${validation.errors.join(', ')}`);
-      }
-    }
-
-    return await this.repository.findAll(filters, sort, pagination);
+    return await this.repository.findAll(filters);
   }
 
   async create(
-    userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>
+    userData: Omit<User, 'id' | 'created_at' | 'updated_at'>
   ): Promise<User> {
     const validation = this.validator.validateCreate(userData);
     if (!validation.isValid) {
@@ -88,28 +76,7 @@ export class UserService implements IUserService {
     // Business logic: Set default values
     const userWithDefaults = {
       ...userData,
-      role: userData.role || 'user',
-      isActive: userData.isActive !== undefined ? userData.isActive : true,
-      isEmailVerified: userData.isEmailVerified || false,
-      preferences: userData.preferences || {
-        theme: 'light',
-        language: 'en',
-        timezone: 'UTC',
-        emailNotifications: true,
-        pushNotifications: true,
-        weekStartsOn: 1,
-        dateFormat: 'MM/DD/YYYY',
-        timeFormat: '12h'
-      },
-      profile: userData.profile || {
-        bio: '',
-        location: '',
-        website: '',
-        company: '',
-        jobTitle: '',
-        skills: [],
-        socialLinks: {}
-      }
+      isApproved: true
     };
 
     // Business logic: Hash password (in real implementation)
@@ -144,19 +111,14 @@ export class UserService implements IUserService {
       if (userWithEmail) {
         throw new Error('User with this email already exists');
       }
-      // Reset email verification if email changes
-      updates.isEmailVerified = false;
     }
 
     // Business logic: Prevent certain updates on inactive users
-    if (!existingUser.isActive && updates.role) {
-      throw new Error('Cannot update role of inactive user');
+    if (!existingUser.isApproved) {
+      throw new Error('Cannot update inactive user');
     }
 
-    // Business logic: Hash password if being updated
-    if (updates.password) {
-      // updates.password = await this.hashPassword(updates.password);
-    }
+
 
     return await this.repository.update(id, updates);
   }
@@ -173,19 +135,8 @@ export class UserService implements IUserService {
       throw new Error('User not found');
     }
 
-    // Business logic: Check if user owns any projects
-    const userStats = await this.repository.getUserStats(id);
-    if (userStats.projectsOwned > 0) {
-      throw new Error('Cannot delete user who owns projects. Transfer ownership first.');
-    }
-
-    // Business logic: Deactivate instead of delete if user has activity
-    if (userStats.tasksAssigned > 0 || userStats.projectsJoined > 0) {
-      await this.deactivate(id);
-      return;
-    }
-
-    await this.repository.delete(id);
+    // Business logic: Deactivate instead of delete to preserve data integrity
+    await this.deactivate(id);
   }
 
   async activate(id: string): Promise<User> {
@@ -200,11 +151,11 @@ export class UserService implements IUserService {
       throw new Error('User not found');
     }
 
-    if (existingUser.isActive) {
+    if (existingUser.isApproved) {
       throw new Error('User is already active');
     }
 
-    return await this.repository.activate(id);
+    return await this.repository.update(id, { isApproved: true });
   }
 
   async deactivate(id: string): Promise<User> {
@@ -219,11 +170,11 @@ export class UserService implements IUserService {
       throw new Error('User not found');
     }
 
-    if (!existingUser.isActive) {
+    if (!existingUser.isApproved) {
       throw new Error('User is already inactive');
     }
 
-    return await this.repository.deactivate(id);
+    return await this.repository.update(id, { isApproved: false });
   }
 
   async updateLastLogin(id: string): Promise<void> {
@@ -238,198 +189,22 @@ export class UserService implements IUserService {
       throw new Error('User not found');
     }
 
-    if (!existingUser.isActive) {
+    if (!existingUser.isApproved) {
       throw new Error('Cannot update last login for inactive user');
     }
 
     await this.repository.updateLastLogin(id);
   }
 
-  async updatePassword(
-    id: string,
-    currentPassword: string,
-    newPassword: string
-  ): Promise<void> {
-    const validation = this.validator.validateId(id);
-    if (!validation.isValid) {
-      throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-    }
 
-    if (!currentPassword || !newPassword) {
-      throw new Error('Current password and new password are required');
-    }
 
-    if (newPassword.length < 8) {
-      throw new Error('New password must be at least 8 characters long');
-    }
 
-    // Check if user exists
-    const existingUser = await this.repository.findById(id);
-    if (!existingUser) {
-      throw new Error('User not found');
-    }
 
-    if (!existingUser.isActive) {
-      throw new Error('Cannot update password for inactive user');
-    }
 
-    // Business logic: Verify current password
-    // const isCurrentPasswordValid = await this.verifyPassword(currentPassword, existingUser.password);
-    // if (!isCurrentPasswordValid) {
-    //   throw new Error('Current password is incorrect');
-    // }
 
-    // Business logic: Hash new password
-    // const hashedNewPassword = await this.hashPassword(newPassword);
 
-    await this.repository.updatePassword(id, newPassword); // In real implementation, pass hashedNewPassword
-  }
 
-  async updatePreferences(
-    id: string,
-    preferences: Partial<User['preferences']>
-  ): Promise<User> {
-    const validation = this.validator.validateId(id);
-    if (!validation.isValid) {
-      throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-    }
 
-    // Check if user exists
-    const existingUser = await this.repository.findById(id);
-    if (!existingUser) {
-      throw new Error('User not found');
-    }
-
-    // Business logic: Validate preferences
-    if (preferences.theme && !['light', 'dark', 'auto'].includes(preferences.theme)) {
-      throw new Error('Invalid theme preference');
-    }
-
-    if (preferences.weekStartsOn && (preferences.weekStartsOn < 0 || preferences.weekStartsOn > 6)) {
-      throw new Error('Week starts on must be between 0 (Sunday) and 6 (Saturday)');
-    }
-
-    if (preferences.dateFormat && !['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'].includes(preferences.dateFormat)) {
-      throw new Error('Invalid date format preference');
-    }
-
-    if (preferences.timeFormat && !['12h', '24h'].includes(preferences.timeFormat)) {
-      throw new Error('Invalid time format preference');
-    }
-
-    return await this.repository.updatePreferences(id, preferences);
-  }
-
-  async verifyEmail(id: string): Promise<User> {
-    const validation = this.validator.validateId(id);
-    if (!validation.isValid) {
-      throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-    }
-
-    // Check if user exists
-    const existingUser = await this.repository.findById(id);
-    if (!existingUser) {
-      throw new Error('User not found');
-    }
-
-    if (existingUser.isEmailVerified) {
-      throw new Error('Email is already verified');
-    }
-
-    return await this.repository.verifyEmail(id);
-  }
-
-  async createSession(
-    userId: string,
-    sessionData: {
-      token: string;
-      expiresAt: Date;
-      userAgent?: string;
-      ipAddress?: string;
-    }
-  ): Promise<any> {
-    const validation = this.validator.validateId(userId);
-    if (!validation.isValid) {
-      throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-    }
-
-    if (!sessionData.token || !sessionData.expiresAt) {
-      throw new Error('Session token and expiration date are required');
-    }
-
-    // Check if user exists and is active
-    const existingUser = await this.repository.findById(userId);
-    if (!existingUser) {
-      throw new Error('User not found');
-    }
-
-    if (!existingUser.isActive) {
-      throw new Error('Cannot create session for inactive user');
-    }
-
-    return await this.repository.createSession(userId, sessionData);
-  }
-
-  async findSession(token: string): Promise<any> {
-    if (!token) {
-      throw new Error('Session token is required');
-    }
-
-    return await this.repository.findSession(token);
-  }
-
-  async deleteSession(token: string): Promise<void> {
-    if (!token) {
-      throw new Error('Session token is required');
-    }
-
-    await this.repository.deleteSession(token);
-  }
-
-  async deleteAllUserSessions(userId: string): Promise<void> {
-    const validation = this.validator.validateId(userId);
-    if (!validation.isValid) {
-      throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-    }
-
-    await this.repository.deleteAllUserSessions(userId);
-  }
-
-  async cleanupExpiredSessions(): Promise<void> {
-    await this.repository.cleanupExpiredSessions();
-  }
-
-  async getUserStats(id: string): Promise<{
-    projectsOwned: number;
-    projectsJoined: number;
-    tasksAssigned: number;
-    tasksCompleted: number;
-  }> {
-    const validation = this.validator.validateId(id);
-    if (!validation.isValid) {
-      throw new Error(`Invalid user ID: ${validation.errors.join(', ')}`);
-    }
-
-    return await this.repository.getUserStats(id);
-  }
-
-  async search(
-    query: string,
-    filters?: SearchFilters
-  ): Promise<User[]> {
-    if (!query || query.trim().length === 0) {
-      throw new Error('Search query is required');
-    }
-
-    if (filters) {
-      const validation = this.validator.validateSearchFilters(filters);
-      if (!validation.isValid) {
-        throw new Error(`Invalid search filters: ${validation.errors.join(', ')}`);
-      }
-    }
-
-    return await this.repository.search(query, filters);
-  }
 
   async authenticate(
     email: string,
@@ -451,7 +226,7 @@ export class UserService implements IUserService {
     }
 
     // Check if user is active
-    if (!user.isActive) {
+    if (!user.isApproved) {
       throw new Error('Account is deactivated');
     }
 
@@ -464,9 +239,7 @@ export class UserService implements IUserService {
     // Update last login
     await this.updateLastLogin(user.id);
 
-    // Return user without password
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword as User;
+    return user;
   }
 
   async canUserAccess(targetUserId: string, currentUserId: string): Promise<boolean> {
@@ -488,18 +261,15 @@ export class UserService implements IUserService {
 
       // Check if current user exists and is active
       const currentUser = await this.repository.findById(currentUserId);
-      if (!currentUser || !currentUser.isActive) {
+      if (!currentUser || !currentUser.isApproved) {
         return false;
       }
 
-      // Admins can access all users
-      if (currentUser.role === 'admin') {
-        return true;
-      }
+      // Note: Role-based access control removed as User interface doesn't include role field
 
       // Check if target user exists and is active
       const targetUser = await this.repository.findById(targetUserId);
-      if (!targetUser || !targetUser.isActive) {
+      if (!targetUser || !targetUser.isApproved) {
         return false;
       }
 
@@ -529,12 +299,13 @@ export class UserService implements IUserService {
 
       // Check if current user exists and is active
       const currentUser = await this.repository.findById(currentUserId);
-      if (!currentUser || !currentUser.isActive) {
+      if (!currentUser || !currentUser.isApproved) {
         return false;
       }
 
-      // Only admins can edit other users
-      return currentUser.role === 'admin';
+      // Note: Role-based access control removed as User interface doesn't include role field
+      // For now, users can only edit their own profiles
+      return false;
     } catch {
       return false;
     }

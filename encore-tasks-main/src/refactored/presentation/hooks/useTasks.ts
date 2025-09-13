@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Task, CreateTaskData, UpdateTaskData, TaskStatus, TaskPriority } from '../../data/types';
-import { TaskService } from '../../business/services';
+import { taskService } from '../../business/services/task.service';
+import { useAuth } from '../context/AuthContext';
 import { useDebounce } from './useDebounce';
 
 interface TaskFilters {
@@ -100,6 +101,8 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
     filters: initialFilters = {},
     sort: initialSort = DEFAULT_SORT
   } = options;
+  
+  const { user } = useAuth();
 
   // State
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -148,15 +151,68 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
         search: debouncedSearch
       };
 
-      const response = await TaskService.getTasks({
-        page: currentPage,
-        limit: pageSize,
-        filters: queryFilters,
-        sort
+      let tasks: Task[] = [];
+      
+      // Choose the most specific method based on available filters
+      if (queryFilters.columnId) {
+        tasks = await taskService.getByColumnId(queryFilters.columnId, user?.id || '');
+      } else if (queryFilters.boardId) {
+        tasks = await taskService.getByBoardId(queryFilters.boardId, user?.id || '');
+      } else if (queryFilters.projectId) {
+        tasks = await taskService.getByProjectId(queryFilters.projectId, user?.id || '');
+      } else if (queryFilters.assigneeId) {
+        tasks = await taskService.getByAssigneeId(queryFilters.assigneeId, user?.id || '');
+      } else if (queryFilters.search) {
+        // Use search method for text-based queries
+        tasks = await taskService.search(queryFilters.search, user?.id || '', {
+          projectIds: queryFilters.projectId ? [queryFilters.projectId] : undefined,
+          boardIds: queryFilters.boardId ? [queryFilters.boardId] : undefined,
+          columnIds: queryFilters.columnId ? [queryFilters.columnId] : undefined
+        });
+      } else {
+        // If no specific filter, get tasks by project (assuming we have a projectId)
+        tasks = queryFilters.projectId ? 
+          await taskService.getByProjectId(queryFilters.projectId, user?.id || '') : [];
+      }
+      
+      // Apply client-side filtering for properties not handled by the service methods
+      let filteredTasks = tasks.filter(task => {
+        if (queryFilters.status && task.status !== queryFilters.status) return false;
+        if (queryFilters.priority && task.priority !== queryFilters.priority) return false;
+        if (queryFilters.showArchived !== undefined && task.isArchived !== queryFilters.showArchived) return false;
+        if (queryFilters.isOverdue && (!task.dueDate || new Date(task.dueDate) >= new Date())) return false;
+        if (queryFilters.hasDueDate && !task.dueDate) return false;
+        if (queryFilters.hasNoDueDate && task.dueDate) return false;
+        return true;
       });
-
-      setTasks(response.data);
-      setTotalTasks(response.total);
+      
+      // Apply sorting
+      filteredTasks.sort((a, b) => {
+        const aValue = a[sort.field];
+        const bValue = b[sort.field];
+        
+        if (aValue === undefined || aValue === null) return 1;
+        if (bValue === undefined || bValue === null) return -1;
+        
+        let comparison = 0;
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          comparison = aValue.localeCompare(bValue);
+        } else if (aValue instanceof Date && bValue instanceof Date) {
+          comparison = aValue.getTime() - bValue.getTime();
+        } else {
+          comparison = aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+        }
+        
+        return sort.order === 'desc' ? -comparison : comparison;
+      });
+      
+      // Apply pagination
+      const startIndex = (currentPage - 1) * pageSize;
+      const endIndex = startIndex + pageSize;
+      const paginatedTasks = filteredTasks.slice(startIndex, endIndex);
+      
+      setTasks(paginatedTasks);
+      setTotalTasks(filteredTasks.length);
     } catch (err) {
       console.error('Error loading tasks:', err);
       setError('Failed to load tasks. Please try again.');
@@ -185,7 +241,25 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
     setError(null);
 
     try {
-      const newTask = await TaskService.createTask(data);
+      // Prepare task data with required properties
+      const taskWithDefaults = {
+        ...data,
+        status: 'todo' as const,
+        priority: data.priority || 'medium' as const,
+        position: 0, // Default position
+        reporterId: user?.id || '',
+        isArchived: false,
+        tags: data.tags || [],
+        projectId: data.projectId || '',
+        boardId: data.boardId || '',
+        metadata: {
+          complexity: 1,
+          businessValue: 1,
+          technicalDebt: false
+        }
+      };
+      
+      const newTask = await taskService.create(taskWithDefaults, user?.id || '');
       
       // Add to current list if it matches filters
       const matchesFilters = (
@@ -219,7 +293,7 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
     setError(null);
 
     try {
-      const updatedTask = await TaskService.updateTask(id, data);
+      const updatedTask = await taskService.update(id, data, user?.id || '');
       
       setTasks(prev => prev.map(task => 
         task.id === id ? updatedTask : task
@@ -241,7 +315,7 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
     setError(null);
 
     try {
-      await TaskService.deleteTask(id);
+      await taskService.delete(id, user?.id || '');
       
       setTasks(prev => prev.filter(task => task.id !== id));
       setTotalTasks(prev => prev - 1);
@@ -260,7 +334,7 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
     setError(null);
 
     try {
-      const archivedTask = await TaskService.archiveTask(id);
+      const archivedTask = await taskService.archive(id, user?.id || '');
       
       if (filters.showArchived) {
         setTasks(prev => prev.map(task => 
@@ -285,7 +359,7 @@ export const useTasks = (options: UseTasksOptions = {}): UseTasksReturn => {
     setError(null);
 
     try {
-      const restoredTask = await TaskService.restoreTask(id);
+      const restoredTask = await taskService.restore(id, user?.id || '');
       
       setTasks(prev => prev.map(task => 
         task.id === id ? restoredTask : task

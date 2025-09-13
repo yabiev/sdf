@@ -2,11 +2,8 @@
 
 import React, { useState } from "react";
 import { useApp } from "@/contexts/AppContext";
-import { User, UserRole } from "@/types";
-import { generateId } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
-import { useConfirmation } from "@/hooks/useConfirmation";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,8 +11,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ isOpen, onClose }: AuthModalProps) {
-  const { state, dispatch, login } = useApp();
-  const { ConfirmationComponent, confirm } = useConfirmation();
+  const { dispatch, login } = useApp();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -83,9 +79,9 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
       }
       
       // Проверяем, требуется ли подтверждение
-      if (response.data?.requiresApproval) {
+      if ((response.data as any)?.requiresApproval) {
         // Устанавливаем пользователя как аутентифицированного, но неодобренного
-        if (response.data.user) {
+        if (response.data?.user) {
           dispatch({
             type: 'LOGIN',
             payload: {
@@ -95,8 +91,8 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
               role: response.data.user.role,
               isApproved: false,
               avatar: response.data.user.avatar,
-              createdAt: new Date(response.data.user.createdAt),
-              updatedAt: new Date(response.data.user.updatedAt)
+              created_at: response.data.user.created_at || new Date().toISOString(),
+              updated_at: response.data.user.updated_at || new Date().toISOString()
             }
           });
         }
@@ -135,13 +131,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setErrors({});
   };
 
-  const handleDemoLogin = (email: string) => {
-    const user = state.users.find(u => u.email === email);
-    if (user) {
-      dispatch({ type: "LOGIN", payload: user });
-      onClose();
-    }
-  };
+
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -348,7 +338,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
           </button>
         </form>
       </div>
-      {ConfirmationComponent()}
     </div>
   );
 }

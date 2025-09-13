@@ -42,14 +42,14 @@ export function TeamPage() {
         
         // Для обычных пользователей показываем только участников проектов, где они сами участвуют
         const userProjects = state.projects.filter(project => 
-          project.members.some(member => member.id === state.currentUser?.id)
+          project.members?.some(member => member.userId === state.currentUser?.id)
         );
         
         const uniqueMembers = new Map();
         userProjects.forEach(project => {
-          project.members.forEach(member => {
-            if (member.isApproved && !uniqueMembers.has(member.id)) {
-              uniqueMembers.set(member.id, member);
+          project.members?.forEach(member => {
+            if (member.isApproved && !uniqueMembers.has(member.userId)) {
+              uniqueMembers.set(member.userId, member);
             }
           });
         });
@@ -57,7 +57,7 @@ export function TeamPage() {
         return Array.from(uniqueMembers.values());
       })();
   
-  const filteredMembers = allMembers.filter(
+  const filteredMembers = (allMembers || []).filter(
     (member) =>
     member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     member.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -65,15 +65,15 @@ export function TeamPage() {
 
   const getUserStats = (userId: string) => {
     const userTasks = state.tasks.filter(
-      (task) => task.assignees?.some(a => a.id === userId) || task.assignee?.id === userId
+      (task) => task.assignees?.some(a => a.id === userId)
     );
     const completedTasks = userTasks.filter((task) => task.status === "done");
     const inProgressTasks = userTasks.filter(
-      (task) => task.status === "in-progress"
+      (task) => task.status === "in_progress"
     );
     const overdueTasks = userTasks.filter((task) => {
-      if (!task.deadline) return false;
-      return new Date(task.deadline) < new Date() && task.status !== "done";
+      if (!task.due_date) return false;
+      return new Date(task.due_date) < new Date() && task.status !== "done";
     });
 
     return {
@@ -108,7 +108,7 @@ export function TeamPage() {
     
     const updatedProject = {
       ...state.selectedProject,
-      members: state.selectedProject.members.filter(m => m.id !== memberToRemove)
+      members: state.selectedProject.members?.filter(m => m.userId !== memberToRemove) || []
     };
     dispatch({ type: 'UPDATE_PROJECT', payload: updatedProject });
     setMemberToRemove(null);
@@ -116,7 +116,7 @@ export function TeamPage() {
 
   const getMemberTasks = (memberId: string) => {
     return state.tasks.filter(task => 
-      task.assignees?.some(a => a.id === memberId) || task.assignee?.id === memberId
+      task.assignees?.some(a => a.id === memberId)
     );
   };
 
@@ -168,7 +168,7 @@ export function TeamPage() {
                 ? state.projects 
                 : state.projects.filter(project => 
                     project.members?.some(member => member.userId === state.currentUser?.id) ||
-                    project.ownerId === state.currentUser?.id
+                    project.created_by === state.currentUser?.id
                   )
               ).map((project) => ({
                 value: project.id,
@@ -213,9 +213,8 @@ export function TeamPage() {
               </p>
               <p className="text-2xl font-bold text-white" data-oid="ku.w_:o">
                 {state.tasks.filter((t) => 
-                  t.status === "in-progress" && 
-                  (t.assignees?.some(a => a.id === state.currentUser?.id) || 
-                   t.assignee?.id === state.currentUser?.id)
+                  t.status === "in_progress" && 
+                  t.assignees?.some(a => a.id === state.currentUser?.id)
                 ).length}
               </p>
             </div>
@@ -237,8 +236,7 @@ export function TeamPage() {
               <p className="text-2xl font-bold text-white" data-oid="wawou.2">
                 {state.tasks.filter((t) => 
                   t.status === "done" && 
-                  (t.assignees?.some(a => a.id === state.currentUser?.id) || 
-                   t.assignee?.id === state.currentUser?.id)
+                  t.assignees?.some(a => a.id === state.currentUser?.id)
                 ).length}
               </p>
             </div>
@@ -263,9 +261,9 @@ export function TeamPage() {
               <p className="text-2xl font-bold text-white" data-oid="2xmg13m">
                 {
                 state.tasks.filter((t) => {
-                  if (!t.deadline) return false;
+                  if (!t.due_date) return false;
                   return (
-                    new Date(t.deadline) < new Date() && t.status !== "done");
+                    new Date(t.due_date) < new Date() && t.status !== "done");
 
                 }).length
                 }
@@ -298,11 +296,11 @@ export function TeamPage() {
           data-oid="abx25x8">
 
           {filteredMembers.map((member) => {
-            const stats = getUserStats(member.id);
+            const stats = getUserStats(member.userId);
 
             return (
               <div
-                key={member.id}
+                key={member.userId}
                 className="bg-white/5 rounded-xl p-6 hover:bg-white/10 transition-colors"
                 data-oid="mk44f21">
 
@@ -450,22 +448,22 @@ export function TeamPage() {
                 {/* Actions */}
                 <div className="flex gap-2 mt-4" data-oid="yub11sg">
                   <button
-                    onClick={() => handleShowTasks(member.id)}
+                    onClick={() => handleShowTasks(member.userId)}
                     className="flex-1 px-3 py-2 bg-primary-500/20 text-primary-300 rounded-lg hover:bg-primary-500/30 transition-colors text-sm"
                     data-oid="34ovrb0">
 
                     Задачи
                   </button>
                   <button
-                    onClick={() => handleShowProfile(member.id)}
+                    onClick={() => handleShowProfile(member.userId)}
                     className="flex-1 px-3 py-2 bg-white/10 text-gray-300 rounded-lg hover:bg-white/20 transition-colors text-sm"
                     data-oid="8rvijfa">
 
                     Профиль
                   </button>
-                  {state.selectedProject && state.currentUser?.role === 'admin' && member.id !== state.currentUser.id && (
+                  {state.selectedProject && state.currentUser?.role === 'admin' && member.userId !== state.currentUser.id && (
                     <button
-                      onClick={() => handleRemoveFromProject(member.id)}
+                      onClick={() => handleRemoveFromProject(member.userId)}
                       className="px-3 py-2 bg-primary-700/20 text-primary-300 rounded-lg hover:bg-primary-700/30 transition-colors text-sm"
                       title="Удалить из проекта">
                       <X className="w-4 h-4" />
@@ -525,12 +523,12 @@ export function TeamPage() {
                       <div className="flex items-center gap-4 text-xs text-gray-400">
                         <span className={`px-2 py-1 rounded ${
                           task.status === 'done' ? 'bg-emerald-500/25 text-emerald-400' :
-          task.status === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400' :
+          task.status === 'in_progress' ? 'bg-yellow-500/20 text-yellow-400' :
   
                           'bg-gray-500/20 text-gray-400'
                         }`}>
                           {task.status === 'done' ? 'Выполнено' :
-                             task.status === 'in-progress' ? 'В работе' :
+                             task.status === 'in_progress' ? 'В работе' :
  'К выполнению'}
                         </span>
                         <span className={`px-2 py-1 rounded ${
@@ -543,15 +541,15 @@ export function TeamPage() {
                            task.priority === 'high' ? 'Высокий' :
                            task.priority === 'medium' ? 'Средний' : 'Низкий'}
                         </span>
-                        {task.deadline && (
-                          <span>Срок: {!isNaN(new Date(task.deadline).getTime()) ? formatDate(new Date(task.deadline)) : 'Неверная дата'}</span>
+                        {task.due_date && (
+                          <span>Срок: {!isNaN(new Date(task.due_date).getTime()) ? formatDate(new Date(task.due_date)) : 'Неверная дата'}</span>
                         )}
                       </div>
                     </div>
                     <button
                       onClick={() => {
-                        const project = state.projects.find(p => p.id === task.projectId);
-                        const board = state.boards.find(b => b.id === task.boardId);
+                        const project = state.projects.find(p => p.id === task.project_id);
+                        const board = state.boards.find(b => b.id === task.board_id);
                         if (project && board) {
                           dispatch({ type: 'SELECT_PROJECT', payload: project });
                           dispatch({ type: 'SELECT_BOARD', payload: board });

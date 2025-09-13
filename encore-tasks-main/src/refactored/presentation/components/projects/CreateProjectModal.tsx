@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { CreateProjectData, ProjectStatus } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select } from '../../common';
+import { CreateProjectData } from '../../../data/types';
+import { Modal, Button, Input, Textarea, Select } from '../common';
 import { ProjectValidator } from '../../../business/validators';
+import { IconPicker } from '../../../../components/IconPicker';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -17,39 +18,29 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [formData, setFormData] = useState<CreateProjectData>({
     name: '',
     description: '',
-    status: 'active'
+    icon: 'FolderOpen'
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const statusOptions = [
-    { value: 'active', label: 'Active' },
-    { value: 'on_hold', label: 'On Hold' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' }
-  ];
+
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    // Validate name
-    const nameValidation = ProjectValidator.validateName(formData.name);
-    if (!nameValidation.isValid) {
-      newErrors.name = nameValidation.errors[0];
-    }
+    // Validate using ProjectValidator.validateCreate
+    const validator = new ProjectValidator();
+    const validation = validator.validateCreate({
+      ...formData,
+      ownerId: 'temp-owner-id' // This will be set by the service
+    });
 
-    // Validate description (optional)
-    if (formData.description) {
-      const descValidation = ProjectValidator.validateDescription(formData.description);
-      if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
-      }
-    }
-
-    // Validate status
-    const statusValidation = ProjectValidator.validateStatus(formData.status);
-    if (!statusValidation.isValid) {
-      newErrors.status = statusValidation.errors[0];
+    if (!validation.isValid) {
+      validation.errors.forEach(error => {
+        if (error.field && error.message) {
+          newErrors[error.field] = error.message;
+        }
+      });
     }
 
     setErrors(newErrors);
@@ -79,7 +70,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setFormData({
       name: '',
       description: '',
-      status: 'active'
+      icon: 'FolderOpen'
     });
     setErrors({});
     setIsSubmitting(false);
@@ -135,18 +126,17 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
           />
         </div>
 
-        {/* Project Status */}
+
+
+        {/* Icon Selection */}
         <div>
-          <label htmlFor="project-status" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Status *
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Project Icon
           </label>
-          <Select
-            id="project-status"
-            value={formData.status}
-            onChange={(value) => handleInputChange('status', value)}
-            options={statusOptions}
-            error={errors.status}
-            disabled={isSubmitting}
+          <IconPicker
+            selectedIcon={formData.icon}
+            onIconSelect={(icon) => handleInputChange('icon', icon)}
+            className="mb-4"
           />
         </div>
 
@@ -181,4 +171,5 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   );
 };
 
+export { CreateProjectModal };
 export default CreateProjectModal;

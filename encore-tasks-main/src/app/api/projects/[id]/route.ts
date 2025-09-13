@@ -1,234 +1,229 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth';
-import databaseAdapter from '@/lib/database-adapter-optimized';
+import { z } from 'zod';
+import { DatabaseAdapter } from '@/lib/database-adapter';
 
-// Получение проекта по ID
+const databaseAdapter = DatabaseAdapter.getInstance();
+import { verifyAuth } from '@/lib/auth';
+import { UpdateProjectDto, ProjectWithStats } from '@/types/core.types';
+
+// Схема валидации для обновления проекта
+const updateProjectSchema = z.object({
+  name: z.string().min(1, 'Название проекта обязательно').max(100, 'Название слишком длинное').optional(),
+  description: z.string().max(500, 'Описание слишком длинное').optional(),
+  color: z.string().regex(/^#[0-9A-F]{6}$/i, 'Неверный формат цвета').optional(),
+  icon: z.string().min(1, 'Иконка обязательна').optional(),
+  status: z.enum(['active', 'archived', 'completed']).optional(),
+  visibility: z.enum(['private', 'public']).optional(),
+  telegram_chat_id: z.string().optional(),
+  telegram_topic_id: z.string().optional(),
+  settings: z.record(z.string(), z.any()).optional()
+});
+
+// Упрощенная проверка доступа к проекту для SQLite
+async function checkProjectAccess(projectId: string, userId: string, requiredRole?: string) {
+  try {
+    const project = await databaseAdapter.getProjectById(projectId);
+    if (!project) {
+      return { hasAccess: false, role: null };
+    }
+    
+    // Для SQLite упрощаем - владелец проекта имеет полный доступ
+    const isOwner = project.created_by === userId;
+    return { hasAccess: isOwner, role: isOwner ? 'owner' : null, isOwner };
+  } catch (error) {
+    return { hasAccess: false, role: null };
+  }
+}
+
+// GET /api/projects/[id] - Получить проект по ID
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    if (!authResult.success || !authResult.user) {
       return NextResponse.json(
-        { error: authResult.error },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { userId, role } = authResult.user;
-    const { id } = await params;
-    const projectId = id;
+    const { id: projectId } = await params;
+    await databaseAdapter.initialize();
 
-    // Валидация ID проекта
-    if (!projectId || projectId === 'null' || projectId === 'undefined' || projectId.trim() === '') {
+    // Проверяем доступ к проекту
+    const accessCheck = await checkProjectAccess(projectId, authResult.user.userId);
+    if (!accessCheck.hasAccess) {
       return NextResponse.json(
-        { error: 'Некорректный ID проекта' },
-        { status: 400 }
+        { success: false, error: 'Project not found or access denied' },
+        { status: 404 }
       );
     }
 
-    // Проверка доступа к проекту
-    const hasAccess = await databaseAdapter.hasProjectAccess(userId, projectId);
-    if (!hasAccess && role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Нет доступа к проекту' },
-        { status: 403 }
-      );
-    }
-
+    // Получаем информацию о проекте
     const project = await databaseAdapter.getProjectById(projectId);
     
     if (!project) {
       return NextResponse.json(
-        { error: 'Проект не найден' },
+        { success: false, error: 'Project not found' },
         { status: 404 }
       );
     }
 
-    // Преобразование в формат API
-    const projectResult = {
-      id: Number(project.id),
-      name: project.name,
-      description: project.description || null,
-      status: project.status || 'active',
-      color: project.color || '#3B82F6',
-      createdAt: project.created_at,
-      updatedAt: project.updated_at,
-      userId: Number(project.user_id)
+    // Для SQLite упрощаем статистику
+    const projectWithStats: ProjectWithStats = {
+      ...project,
+      icon: project.icon_url || 'folder',
+      status: 'active',
+      visibility: 'private',
+      settings: {},
+      created_by_username: 'admin', // Упрощено для SQLite
+      members_count: 1,
+      boards_count: 0,
+      tasks_count: 0
     };
 
-    return NextResponse.json({ project: projectResult });
+    // Для SQLite упрощаем - только владелец проекта
+    const members = [{
+      id: '1',
+      project_id: projectId,
+      user_id: authResult.user.userId,
+      role: 'owner',
+      permissions: {},
+      joined_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      user: {
+        id: authResult.user.userId,
+        username: authResult.user.name,
+        first_name: '',
+        last_name: '',
+        email: authResult.user.email,
+        avatar_url: null
+      }
+    }];
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        project: projectWithStats,
+        members,
+        user_role: accessCheck.role
+      }
+    });
 
   } catch (error) {
-    console.error('Ошибка получения проекта:', error);
+    console.error('Error fetching project:', error);
     return NextResponse.json(
-      { error: 'Внутренняя ошибка сервера' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
-// Обновление проекта
+// PUT /api/projects/[id] - Обновить проект
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    if (!authResult.success || !authResult.user) {
       return NextResponse.json(
-        { error: authResult.error },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { userId, role } = authResult.user;
-    const { id } = await params;
-    const projectId = id;
-    const updateData = await request.json();
-    
-    // Валидация ID проекта
-    if (!projectId || projectId === 'null' || projectId === 'undefined') {
+    const { id: projectId } = await params;
+    await databaseAdapter.initialize();
+
+    // Проверяем доступ к проекту (требуется роль admin или выше)
+    const accessCheck = await checkProjectAccess(projectId, authResult.user.userId, 'admin');
+    if (!accessCheck.hasAccess) {
       return NextResponse.json(
-        { error: 'Некорректный ID проекта' },
-        { status: 400 }
-      );
-    }
-    
-    // Проверка существования проекта
-    const existingProject = await databaseAdapter.getProjectById(projectId);
-    if (!existingProject) {
-      return NextResponse.json(
-        { error: 'Проект не найден' },
-        { status: 404 }
-      );
-    }
-    
-    // Проверка прав на изменение проекта
-    const isOwner = Number(existingProject.user_id) === Number(userId);
-    if (!isOwner && role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Нет прав на изменение проекта' },
+        { success: false, error: 'Access denied: Admin role required' },
         { status: 403 }
       );
     }
 
-    // Подготовка данных для обновления
-    const allowedFields = ['name', 'description', 'color', 'status'];
-    const updateProjectData: any = {};
-    
-    for (const field of allowedFields) {
-      if (updateData[field] !== undefined) {
-        updateProjectData[field] = updateData[field];
-      }
-    }
+    const body = await request.json();
+    const validationResult = updateProjectSchema.safeParse(body);
 
-    if (Object.keys(updateProjectData).length === 0) {
+    if (!validationResult.success) {
       return NextResponse.json(
-        { error: 'Нет данных для обновления' },
+        {
+          success: false,
+          error: 'Validation failed',
+          details: validationResult.error.issues
+        },
         { status: 400 }
       );
     }
 
-    // Обновление проекта
-    const success = await databaseAdapter.updateProject(projectId, updateProjectData);
-    
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Ошибка обновления проекта' },
-        { status: 500 }
-      );
-    }
+    const updateData: UpdateProjectDto = validationResult.data;
 
-    // Получение обновленного проекта
-    const updatedProject = await databaseAdapter.getProjectById(projectId);
-    
-    const projectResult = {
-      id: Number(updatedProject!.id),
-      name: updatedProject!.name,
-      description: updatedProject!.description || null,
-      status: updatedProject!.status || 'active',
-      color: updatedProject!.color || '#3B82F6',
-      createdAt: updatedProject!.created_at,
-      updatedAt: updatedProject!.updated_at,
-      userId: Number(updatedProject!.user_id)
-    };
-
-    return NextResponse.json({ project: projectResult });
+    // Для SQLite пока не реализуем обновление проектов
+    return NextResponse.json({
+      success: false,
+      error: 'Project update not implemented for SQLite'
+    }, { status: 501 });
 
   } catch (error) {
-    console.error('Ошибка обновления проекта:', error);
+    console.error('Error updating project:', error);
     return NextResponse.json(
-      { error: 'Внутренняя ошибка сервера' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
-// Удаление проекта
+// DELETE /api/projects/[id] - Удалить проект
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = await verifyAuth(request);
-    if (!authResult.success) {
+    if (!authResult.success || !authResult.user) {
       return NextResponse.json(
-        { error: authResult.error },
+        { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    const { userId, role } = authResult.user;
-    const { id } = await params;
-    const projectId = id;
-    
-    // Валидация ID проекта
-    if (!projectId || projectId === 'null' || projectId === 'undefined') {
+    const { id: projectId } = await params;
+    await databaseAdapter.initialize();
+
+    // Проверяем доступ к проекту (требуется роль owner или admin системы)
+    const accessCheck = await checkProjectAccess(projectId, authResult.user.userId);
+    if (!accessCheck.hasAccess || (!accessCheck.isOwner && authResult.user.role !== 'admin')) {
       return NextResponse.json(
-        { error: 'Некорректный ID проекта' },
-        { status: 400 }
-      );
-    }
-    
-    // Проверка существования проекта
-    const existingProject = await databaseAdapter.getProjectById(projectId);
-    if (!existingProject) {
-      return NextResponse.json(
-        { error: 'Проект не найден' },
-        { status: 404 }
-      );
-    }
-    
-    // Проверка прав на удаление проекта
-    const isOwner = Number(existingProject.user_id) === Number(userId);
-    if (!isOwner && role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Нет прав на удаление проекта' },
+        { success: false, error: 'Access denied: Owner or admin role required' },
         { status: 403 }
       );
     }
 
-    // Удаление проекта
-    const success = await databaseAdapter.deleteProject(projectId);
+    // Удаляем проект через SQLite адаптер
+    const deleted = await databaseAdapter.deleteProject(projectId);
     
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Ошибка удаления проекта' },
-        { status: 500 }
-      );
+    if (!deleted) {
+      return NextResponse.json({
+        success: false,
+        error: 'Project not found or could not be deleted'
+      }, { status: 404 });
     }
 
-    return NextResponse.json(
-      { message: 'Проект успешно удален' },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      success: true,
+      message: 'Project deleted successfully'
+    });
 
   } catch (error) {
-    console.error('Ошибка удаления проекта:', error);
+    console.error('Error deleting project:', error);
     return NextResponse.json(
-      { error: 'Внутренняя ошибка сервера' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }

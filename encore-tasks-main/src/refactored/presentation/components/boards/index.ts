@@ -11,7 +11,5 @@ export type {
   Board,
   CreateBoardData,
   UpdateBoardData,
-  BoardFilters as BoardFiltersType,
-  BoardSortField,
   SortOrder
 } from '../../../data/types';

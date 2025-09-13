@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { dbAdapter as databaseAdapter } from '@/lib/database-adapter';
-import { v4 as uuidv4 } from 'uuid';
+import { NextRequest, NextResponse } from 'next/server';
+import { DatabaseAdapter } from '@/lib/database-adapter';
+
+const databaseAdapter = DatabaseAdapter.getInstance();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
       console.log('👤 User details:', {
         id: user.id,
         email: user.email,
-        approval_status: user.approval_status,
+        approval_status: user.isApproved,
         has_password: !!user.password_hash
       });
     }
@@ -44,6 +45,8 @@ export async function POST(request: NextRequest) {
     // Проверка пароля
     console.log('🔐 Checking password for user:', user.email);
     console.log('🔐 Has password hash:', !!user.password_hash);
+    console.log('🔐 Password hash from DB:', user.password_hash ? user.password_hash.substring(0, 20) + '...' : 'null');
+    console.log('🔐 Input password:', password);
     const isValidPassword = user.password_hash ? await bcrypt.compare(password, user.password_hash) : false;
     console.log('🔐 Password valid:', isValidPassword);
     
@@ -57,19 +60,47 @@ export async function POST(request: NextRequest) {
     
     console.log('✅ Password validation successful');
 
+    // TODO: Добавить очистку старых сессий после реализации метода в SQLiteAdapter
+    // await databaseAdapter.deleteUserSessions(user.id);
+    
     // Создание сессии с правильной типизацией
     const sessionToken = jwt.sign(
-      { userId: user.id, email: user.email },
+      { 
+        userId: user.id, 
+        email: user.email,
+        timestamp: Date.now(),
+        random: Math.random().toString(36).substring(2, 15)
+      },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
     
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 дней
     
+    if (!user.id) {
+      console.error('❌ User ID is missing');
+      return NextResponse.json(
+        { error: 'Ошибка данных пользователя' },
+        { status: 500 }
+      );
+    }
+    
+    console.log('📝 Creating session for user ID:', user.id, 'type:', typeof user.id);
+    console.log('📝 User ID as string:', user.id.toString());
+    
+    // Дополнительная проверка типа user.id
+    if (typeof user.id !== 'number' && typeof user.id !== 'string') {
+      console.error('❌ User ID has invalid type:', typeof user.id, 'value:', user.id);
+      return NextResponse.json(
+        { error: 'Ошибка типа данных пользователя' },
+        { status: 500 }
+      );
+    }
+    
     await databaseAdapter.createSession({
-      userId: user.id,
       token: sessionToken,
-      expiresAt: expiresAt
+      user_id: user.id.toString(),
+      expires_at: expiresAt.toISOString()
     });
 
     // TODO: Добавить обновление времени последнего входа после добавления колонки last_login_at
@@ -82,8 +113,8 @@ export async function POST(request: NextRequest) {
       name: user.name,
       email: user.email,
       role: user.role,
-      approval_status: user.approval_status || 'approved',
-      status: user.is_active ? 'active' : 'inactive',
+      approval_status: user.isApproved ? 'approved' : 'pending',
+      status: 'active',
       avatar: user.avatar || null,
       createdAt: user.created_at,
       updatedAt: user.updated_at

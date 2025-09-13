@@ -9,7 +9,8 @@ import { CalendarPage } from "./pages/CalendarPage";
 import { TeamPage } from "./pages/TeamPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { KanbanBoard } from "./KanbanBoard";
+import { ProjectsPage } from "./pages/ProjectsPage";
+import KanbanBoard from "./KanbanBoard";
 import { AuthModal } from "./AuthModal";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { NoProjectsScreen } from "./NoProjectsScreen";
@@ -27,6 +28,9 @@ export function Layout({ children }: LayoutProps) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(
     !state.isAuthenticated
   );
+
+  // Get the current active project
+  const currentProject = state.selectedProject || (state.projects && state.projects.length > 0 ? state.projects[0] : undefined);
 
   const handleNavigate = (page: string) => {
     setCurrentPage(page);
@@ -92,7 +96,8 @@ export function Layout({ children }: LayoutProps) {
       <AuthModal
         isOpen={true}
         onClose={() => setIsAuthModalOpen(false)}
-        data-oid="auth-modal" />);
+        data-oid="auth-modal" />
+    );
   }
 
   // Show welcome screen for unapproved users
@@ -103,7 +108,7 @@ export function Layout({ children }: LayoutProps) {
   // Show no projects screen for approved users without projects
   if (state.currentUser && state.currentUser.isApproved && state.currentUser.role === 'user') {
     const userProjects = state.projects.filter(project => 
-      project.members.some(member => member.id === state.currentUser?.id)
+      project.members?.some(member => member.userId === state.currentUser?.id)
     );
     if (userProjects.length === 0) {
       return <NoProjectsScreen />;
@@ -119,6 +124,8 @@ export function Layout({ children }: LayoutProps) {
     switch (currentPage) {
       case "home":
         return <HomePage onNavigate={handleNavigate} data-oid="hvlzykk" />;
+      case "projects":
+        return <ProjectsPage onNavigate={handleNavigate} data-oid="projects-page" />;
       case "calendar":
         return <CalendarPage data-oid="37_ovjc" />;
       case "team":
@@ -129,7 +136,20 @@ export function Layout({ children }: LayoutProps) {
         return <SettingsPage data-oid="7klkex1" />;
       case "boards":
       default:
-        return children || <KanbanBoard data-oid="z.s0h3k" />;
+        if (children) {
+          return children;
+        }
+        
+        if (!currentProject) {
+          return <div className="flex items-center justify-center h-full text-gray-500">Выберите проект для работы с досками</div>;
+        }
+        
+        const currentBoard = currentProject?.boards?.[0];
+        if (!currentBoard) {
+          return <div className="flex items-center justify-center h-full text-gray-500">В проекте нет досок</div>;
+        }
+        
+        return <KanbanBoard board={currentBoard} data-oid="z.s0h3k" />;
     }
   };
 
@@ -172,7 +192,8 @@ export function Layout({ children }: LayoutProps) {
           onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
           sidebarCollapsed={sidebarCollapsed}
           onNavigate={handleNavigate}
-          currentPage={currentPage} />
+          currentPage={currentPage}
+          currentProject={currentProject} />
 
         <main className="flex-1 overflow-auto page-enter" data-oid="v:znibt">
           {renderPage()}

@@ -3,17 +3,7 @@
 
 import {
   ValidationResult,
-  ValidationError,
-  Project,
-  Board,
-  Task,
-  User,
-  Column,
-  TaskDependency,
-  Comment,
-  Attachment,
-  TaskPriority,
-  TaskStatus
+  ValidationError
 } from '../../data/types';
 import {
   IProjectValidator,
@@ -35,13 +25,13 @@ abstract class BaseValidator {
     errors.push({ field, message, code });
   }
 
-  protected validateRequired(value: any, field: string, errors: ValidationError[]): void {
+  protected validateRequired(value: unknown, field: string, errors: ValidationError[]): void {
     if (value === undefined || value === null || value === '') {
       this.addError(errors, field, `${field} is required`, 'REQUIRED');
     }
   }
 
-  protected validateString(value: any, field: string, minLength = 0, maxLength = Infinity, errors: ValidationError[]): void {
+  protected validateString(value: unknown, field: string, minLength = 0, maxLength = Infinity, errors: ValidationError[]): void {
     if (typeof value !== 'string') {
       this.addError(errors, field, `${field} must be a string`, 'INVALID_TYPE');
       return;
@@ -71,7 +61,7 @@ abstract class BaseValidator {
     }
   }
 
-  protected validateDate(date: any, field: string, errors: ValidationError[]): void {
+  protected validateDate(date: unknown, field: string, errors: ValidationError[]): void {
     if (!(date instanceof Date) && typeof date !== 'string') {
       this.addError(errors, field, `${field} must be a valid date`, 'INVALID_DATE');
       return;
@@ -83,7 +73,7 @@ abstract class BaseValidator {
     }
   }
 
-  protected validateNumber(value: any, field: string, min = -Infinity, max = Infinity, errors: ValidationError[]): void {
+  protected validateNumber(value: unknown, field: string, min = -Infinity, max = Infinity, errors: ValidationError[]): void {
     if (typeof value !== 'number' || isNaN(value)) {
       this.addError(errors, field, `${field} must be a valid number`, 'INVALID_NUMBER');
       return;
@@ -98,13 +88,13 @@ abstract class BaseValidator {
     }
   }
 
-  protected validateEnum<T>(value: any, field: string, allowedValues: T[], errors: ValidationError[]): void {
-    if (!allowedValues.includes(value)) {
+  protected validateEnum<T>(value: unknown, field: string, allowedValues: T[], errors: ValidationError[]): void {
+    if (!allowedValues.includes(value as T)) {
       this.addError(errors, field, `${field} must be one of: ${allowedValues.join(', ')}`, 'INVALID_ENUM');
     }
   }
 
-  protected validateArray(value: any, field: string, minLength = 0, maxLength = Infinity, errors: ValidationError[]): void {
+  protected validateArray(value: unknown, field: string, minLength = 0, maxLength = Infinity, errors: ValidationError[]): void {
     if (!Array.isArray(value)) {
       this.addError(errors, field, `${field} must be an array`, 'INVALID_TYPE');
       return;
@@ -129,187 +119,319 @@ abstract class BaseValidator {
 
 // Project Validator
 export class ProjectValidator extends BaseValidator implements IProjectValidator {
-  validateCreate(data: any): ValidationResult {
+  validateCreate(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
+    if (typeof data !== 'object' || data === null) {
+      this.addError(errors, 'data', 'Data must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const projectData = data as any;
+
     // Required fields
-    this.validateRequired(data.name, 'name', errors);
-    this.validateRequired(data.ownerId, 'ownerId', errors);
+    this.validateRequired(projectData.name, 'name', errors);
+    this.validateRequired(projectData.ownerId, 'ownerId', errors);
 
     // String validations
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 100, errors);
+    if (projectData.name !== undefined) {
+      this.validateString(projectData.name, 'name', 1, 100, errors);
     }
 
-    if (data.description !== undefined && data.description !== null) {
-      this.validateString(data.description, 'description', 0, 1000, errors);
+    if (projectData.description !== undefined && projectData.description !== null) {
+      this.validateString(projectData.description, 'description', 0, 1000, errors);
     }
 
-    if (data.color !== undefined) {
-      this.validateString(data.color, 'color', 3, 7, errors);
+    if (projectData.color !== undefined) {
+      this.validateString(projectData.color, 'color', 3, 7, errors);
       // Validate hex color format
-      if (typeof data.color === 'string' && !/^#[0-9A-F]{6}$/i.test(data.color)) {
+      if (typeof projectData.color === 'string' && !/^#[0-9A-F]{6}$/i.test(projectData.color)) {
         this.addError(errors, 'color', 'Color must be a valid hex color (e.g., #FF0000)', 'INVALID_COLOR');
       }
     }
 
     // UUID validation
-    if (data.ownerId !== undefined) {
-      this.validateUuid(data.ownerId, 'ownerId', errors);
+    if (projectData.ownerId !== undefined) {
+      this.validateUuid(projectData.ownerId, 'ownerId', errors);
     }
 
     // Settings validation
-    if (data.settings) {
-      this.validateProjectSettings(data.settings, errors);
+    if (projectData.settings) {
+      this.validateProjectSettings(projectData.settings, errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateUpdate(data: any): ValidationResult {
+  validateUpdate(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
+    if (typeof data !== 'object' || data === null) {
+      this.addError(errors, 'data', 'Data must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const projectData = data as any;
+
     // Optional string validations
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 100, errors);
+    if (projectData.name !== undefined) {
+      this.validateString(projectData.name, 'name', 1, 100, errors);
     }
 
-    if (data.description !== undefined && data.description !== null) {
-      this.validateString(data.description, 'description', 0, 1000, errors);
+    if (projectData.description !== undefined && projectData.description !== null) {
+      this.validateString(projectData.description, 'description', 0, 1000, errors);
     }
 
-    if (data.color !== undefined) {
-      this.validateString(data.color, 'color', 3, 7, errors);
-      if (typeof data.color === 'string' && !/^#[0-9A-F]{6}$/i.test(data.color)) {
+    if (projectData.color !== undefined) {
+      this.validateString(projectData.color, 'color', 3, 7, errors);
+      if (typeof projectData.color === 'string' && !/^#[0-9A-F]{6}$/i.test(projectData.color)) {
         this.addError(errors, 'color', 'Color must be a valid hex color (e.g., #FF0000)', 'INVALID_COLOR');
       }
     }
 
-    if (data.settings) {
-      this.validateProjectSettings(data.settings, errors);
+    if (projectData.settings) {
+      this.validateProjectSettings(projectData.settings, errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateMember(data: any): ValidationResult {
+  validateMember(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    this.validateRequired(data.userId, 'userId', errors);
-    this.validateRequired(data.role, 'role', errors);
-
-    if (data.userId !== undefined) {
-      this.validateUuid(data.userId, 'userId', errors);
+    if (typeof data !== 'object' || data === null) {
+      this.addError(errors, 'data', 'Data must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.role !== undefined) {
-      this.validateEnum(data.role, 'role', ['owner', 'admin', 'member', 'viewer'], errors);
+    const memberData = data as any;
+
+    this.validateRequired(memberData.userId, 'userId', errors);
+    this.validateRequired(memberData.role, 'role', errors);
+
+    if (memberData.userId !== undefined) {
+      this.validateUuid(memberData.userId, 'userId', errors);
+    }
+
+    if (memberData.role !== undefined) {
+      this.validateEnum(memberData.role, 'role', ['owner', 'admin', 'member', 'viewer'], errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  private validateProjectSettings(settings: any, errors: ValidationError[]): void {
+  validateId(id: string): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    this.validateRequired(id, 'id', errors);
+    if (id !== undefined) {
+      this.validateString(id, 'id', 1, undefined, errors);
+      this.validateUuid(id, 'id', errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validateSearchFilters(filters: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    if (filters === undefined || filters === null) {
+      return this.createValidationResult(errors);
+    }
+    
+    if (typeof filters !== 'object') {
+      this.addError(errors, 'filters', 'Filters must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+    
+    const filtersData = filters as any;
+    
+    // Validate individual filter properties if they exist
+    if (filtersData.statuses !== undefined) {
+      this.validateArray(filtersData.statuses, 'filters.statuses', 0, 10, errors);
+    }
+    
+    if (filtersData.query !== undefined && filtersData.query !== null) {
+      this.validateString(filtersData.query, 'filters.query', 0, 100, errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validateSortOptions(sort: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    if (sort === undefined || sort === null) {
+      return this.createValidationResult(errors);
+    }
+    
+    if (typeof sort !== 'object') {
+      this.addError(errors, 'sort', 'Sort options must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+    
+    const sortData = sort as any;
+    
+    if (sortData.field !== undefined) {
+      this.validateEnum(sortData.field, 'sort.field', ['name', 'createdAt', 'updatedAt'], errors);
+    }
+    
+    if (sortData.order !== undefined) {
+      this.validateEnum(sortData.order, 'sort.order', ['asc', 'desc'], errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validatePaginationOptions(pagination: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    if (pagination === undefined || pagination === null) {
+      return this.createValidationResult(errors);
+    }
+    
+    if (typeof pagination !== 'object') {
+      this.addError(errors, 'pagination', 'Pagination options must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+    
+    const paginationData = pagination as any;
+    
+    if (paginationData.page !== undefined) {
+      this.validateNumber(paginationData.page, 'pagination.page', 1, 1000, errors);
+    }
+    
+    if (paginationData.limit !== undefined) {
+      this.validateNumber(paginationData.limit, 'pagination.limit', 1, 100, errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  private validateProjectSettings(settings: unknown, errors: ValidationError[]): void {
     if (typeof settings !== 'object' || settings === null) {
       this.addError(errors, 'settings', 'Settings must be an object', 'INVALID_TYPE');
       return;
     }
 
-    if (settings.defaultTaskPriority !== undefined) {
-      this.validateEnum(settings.defaultTaskPriority, 'settings.defaultTaskPriority', ['low', 'medium', 'high', 'urgent'], errors);
+    const settingsData = settings as any;
+
+    if (settingsData.defaultTaskPriority !== undefined) {
+      this.validateEnum(settingsData.defaultTaskPriority, 'settings.defaultTaskPriority', ['low', 'medium', 'high', 'urgent'], errors);
     }
   }
 }
 
 // Board Validator
 export class BoardValidator extends BaseValidator implements IBoardValidator {
-  validateCreate(data: any): ValidationResult {
+  validateCreate(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    // Required fields
-    this.validateRequired(data.name, 'name', errors);
-    this.validateRequired(data.projectId, 'projectId', errors);
-
-    // String validations
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 100, errors);
+    if (typeof data !== 'object' || data === null) {
+      this.addError(errors, 'data', 'Data must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.description !== undefined && data.description !== null) {
-      this.validateString(data.description, 'description', 0, 1000, errors);
+    const boardData = data as any;
+
+    // Required fields
+    this.validateRequired(boardData.name, 'name', errors);
+    this.validateRequired(boardData.projectId, 'projectId', errors);
+
+    // String validations
+    if (boardData.name !== undefined) {
+      this.validateString(boardData.name, 'name', 1, 100, errors);
+    }
+
+    if (boardData.description !== undefined && boardData.description !== null) {
+      this.validateString(boardData.description, 'description', 0, 1000, errors);
     }
 
     // UUID validation
-    if (data.projectId !== undefined) {
-      this.validateUuid(data.projectId, 'projectId', errors);
+    if (boardData.projectId !== undefined) {
+      this.validateUuid(boardData.projectId, 'projectId', errors);
     }
 
     // Number validation
-    if (data.position !== undefined) {
-      this.validateNumber(data.position, 'position', 0, undefined, errors);
+    if (boardData.position !== undefined) {
+      this.validateNumber(boardData.position, 'position', 0, undefined, errors);
     }
 
     // Settings validation
-    if (data.settings) {
-      this.validateBoardSettings(data.settings, errors);
+    if (boardData.settings) {
+      this.validateBoardSettings(boardData.settings, errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateUpdate(data: any): ValidationResult {
+  validateUpdate(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
+
+    if (typeof data !== 'object' || data === null) {
+      this.addError(errors, 'data', 'Data must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const boardData = data as any;
 
     // Optional validations
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 100, errors);
+    if (boardData.name !== undefined) {
+      this.validateString(boardData.name, 'name', 1, 100, errors);
     }
 
-    if (data.description !== undefined && data.description !== null) {
-      this.validateString(data.description, 'description', 0, 1000, errors);
+    if (boardData.description !== undefined && boardData.description !== null) {
+      this.validateString(boardData.description, 'description', 0, 1000, errors);
     }
 
-    if (data.position !== undefined) {
-      this.validateNumber(data.position, 'position', 0, undefined, errors);
+    if (boardData.position !== undefined) {
+      this.validateNumber(boardData.position, 'position', 0, undefined, errors);
     }
 
-    if (data.settings) {
-      this.validateBoardSettings(data.settings, errors);
+    if (boardData.settings) {
+      this.validateBoardSettings(boardData.settings, errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateColumn(data: any): ValidationResult {
+  validateColumn(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
+    if (typeof data !== 'object' || data === null) {
+      this.addError(errors, 'data', 'Data must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const columnData = data as any;
+
     // Required fields
-    this.validateRequired(data.name, 'name', errors);
-    this.validateRequired(data.boardId, 'boardId', errors);
+    this.validateRequired(columnData.name, 'name', errors);
+    this.validateRequired(columnData.boardId, 'boardId', errors);
 
     // String validations
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 50, errors);
+    if (columnData.name !== undefined) {
+      this.validateString(columnData.name, 'name', 1, 50, errors);
     }
 
     // UUID validation
-    if (data.boardId !== undefined) {
-      this.validateUuid(data.boardId, 'boardId', errors);
+    if (columnData.boardId !== undefined) {
+      this.validateUuid(columnData.boardId, 'boardId', errors);
     }
 
     // Number validations
-    if (data.position !== undefined) {
-      this.validateNumber(data.position, 'position', 0, undefined, errors);
+    if (columnData.position !== undefined) {
+      this.validateNumber(columnData.position, 'position', 0, undefined, errors);
     }
 
-    if (data.wipLimit !== undefined && data.wipLimit !== null) {
-      this.validateNumber(data.wipLimit, 'wipLimit', 1, 100, errors);
+    if (columnData.wipLimit !== undefined && columnData.wipLimit !== null) {
+      this.validateNumber(columnData.wipLimit, 'wipLimit', 1, 100, errors);
     }
 
     // Color validation
-    if (data.color !== undefined && data.color !== null) {
-      this.validateString(data.color, 'color', 3, 7, errors);
-      if (typeof data.color === 'string' && !/^#[0-9A-F]{6}$/i.test(data.color)) {
+    if (columnData.color !== undefined && columnData.color !== null) {
+      this.validateString(columnData.color, 'color', 3, 7, errors);
+      if (typeof columnData.color === 'string' && !/^#[0-9A-F]{6}$/i.test(columnData.color)) {
         this.addError(errors, 'color', 'Color must be a valid hex color (e.g., #FF0000)', 'INVALID_COLOR');
       }
     }
@@ -317,14 +439,16 @@ export class BoardValidator extends BaseValidator implements IBoardValidator {
     return this.createValidationResult(errors);
   }
 
-  private validateBoardSettings(settings: any, errors: ValidationError[]): void {
+  private validateBoardSettings(settings: unknown, errors: ValidationError[]): void {
     if (typeof settings !== 'object' || settings === null) {
       this.addError(errors, 'settings', 'Settings must be an object', 'INVALID_TYPE');
       return;
     }
 
-    if (settings.defaultColumnId !== undefined && settings.defaultColumnId !== null) {
-      this.validateUuid(settings.defaultColumnId, 'settings.defaultColumnId', errors);
+    const settingsData = settings as any;
+
+    if (settingsData.defaultColumnId !== undefined && settingsData.defaultColumnId !== null) {
+      this.validateUuid(settingsData.defaultColumnId, 'settings.defaultColumnId', errors);
     }
   }
 
@@ -351,84 +475,188 @@ export class BoardValidator extends BaseValidator implements IBoardValidator {
     validator.validateUuid(projectId, 'projectId', errors);
     return validator.createValidationResult(errors);
   }
+
+  validateId(id: string): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    this.validateRequired(id, 'id', errors);
+    if (id !== undefined) {
+      this.validateString(id, 'id', 1, undefined, errors);
+      this.validateUuid(id, 'id', errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validateSearchFilters(filters: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    if (filters === undefined || filters === null) {
+      return this.createValidationResult(errors);
+    }
+    
+    if (typeof filters !== 'object') {
+      this.addError(errors, 'filters', 'Filters must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+    
+    const filtersData = filters as any;
+    
+    // Validate individual filter properties if they exist
+    if (filtersData.status !== undefined) {
+      this.validateEnum(filtersData.status, 'filters.status', ['active', 'archived'], errors);
+    }
+    
+    if (filtersData.projectId !== undefined) {
+      this.validateUuid(filtersData.projectId, 'filters.projectId', errors);
+    }
+    
+    if (filtersData.search !== undefined && filtersData.search !== null) {
+      this.validateString(filtersData.search, 'filters.search', 0, 100, errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validateSortOptions(sort: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    if (sort === undefined || sort === null) {
+      return this.createValidationResult(errors);
+    }
+    
+    if (typeof sort !== 'object') {
+      this.addError(errors, 'sort', 'Sort options must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+    
+    const sortData = sort as any;
+    
+    if (sortData.field !== undefined) {
+      this.validateEnum(sortData.field, 'sort.field', ['name', 'createdAt', 'updatedAt', 'position'], errors);
+    }
+    
+    if (sortData.order !== undefined) {
+      this.validateEnum(sortData.order, 'sort.order', ['asc', 'desc'], errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validatePaginationOptions(pagination: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    if (pagination === undefined || pagination === null) {
+      return this.createValidationResult(errors);
+    }
+    
+    if (typeof pagination !== 'object') {
+      this.addError(errors, 'pagination', 'Pagination options must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+    
+    const paginationData = pagination as any;
+    
+    if (paginationData.page !== undefined) {
+      this.validateNumber(paginationData.page, 'pagination.page', 1, undefined, errors);
+    }
+    
+    if (paginationData.limit !== undefined) {
+      this.validateNumber(paginationData.limit, 'pagination.limit', 1, 100, errors);
+    }
+    
+    if (paginationData.offset !== undefined) {
+      this.validateNumber(paginationData.offset, 'pagination.offset', 0, undefined, errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
 }
 
 // Task Validator
 export class TaskValidator extends BaseValidator implements ITaskValidator {
-  validateCreate(data: any): ValidationResult {
+  validateCreate(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    // Required fields
-    this.validateRequired(data.title, 'title', errors);
-    this.validateRequired(data.columnId, 'columnId', errors);
-    this.validateRequired(data.boardId, 'boardId', errors);
-    this.validateRequired(data.projectId, 'projectId', errors);
-    this.validateRequired(data.reporterId, 'reporterId', errors);
-    this.validateRequired(data.status, 'status', errors);
-    this.validateRequired(data.priority, 'priority', errors);
-
-    // String validations
-    if (data.title !== undefined) {
-      this.validateString(data.title, 'title', 1, 200, errors);
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.description !== undefined && data.description !== null) {
-      this.validateString(data.description, 'description', 0, 5000, errors);
+    const taskData = data as any;
+
+    // Required fields
+    this.validateRequired(taskData.title, 'title', errors);
+    this.validateRequired(taskData.columnId, 'columnId', errors);
+    this.validateRequired(taskData.boardId, 'boardId', errors);
+    this.validateRequired(taskData.projectId, 'projectId', errors);
+    this.validateRequired(taskData.reporterId, 'reporterId', errors);
+    this.validateRequired(taskData.status, 'status', errors);
+    this.validateRequired(taskData.priority, 'priority', errors);
+
+    // String validations
+    if (taskData.title !== undefined) {
+      this.validateString(taskData.title, 'title', 1, 200, errors);
+    }
+
+    if (taskData.description !== undefined && taskData.description !== null) {
+      this.validateString(taskData.description, 'description', 0, 5000, errors);
     }
 
     // UUID validations
-    if (data.columnId !== undefined) {
-      this.validateUuid(data.columnId, 'columnId', errors);
+    if (taskData.columnId !== undefined) {
+      this.validateUuid(taskData.columnId, 'columnId', errors);
     }
 
-    if (data.boardId !== undefined) {
-      this.validateUuid(data.boardId, 'boardId', errors);
+    if (taskData.boardId !== undefined) {
+      this.validateUuid(taskData.boardId, 'boardId', errors);
     }
 
-    if (data.projectId !== undefined) {
-      this.validateUuid(data.projectId, 'projectId', errors);
+    if (taskData.projectId !== undefined) {
+      this.validateUuid(taskData.projectId, 'projectId', errors);
     }
 
-    if (data.reporterId !== undefined) {
-      this.validateUuid(data.reporterId, 'reporterId', errors);
+    if (taskData.reporterId !== undefined) {
+      this.validateUuid(taskData.reporterId, 'reporterId', errors);
     }
 
-    if (data.assigneeId !== undefined && data.assigneeId !== null) {
-      this.validateUuid(data.assigneeId, 'assigneeId', errors);
+    if (taskData.assigneeId !== undefined && taskData.assigneeId !== null) {
+      this.validateUuid(taskData.assigneeId, 'assigneeId', errors);
     }
 
     // Enum validations
-    if (data.status !== undefined) {
-      this.validateEnum(data.status, 'status', ['todo', 'in_progress', 'review', 'done', 'blocked'], errors);
+    if (taskData.status !== undefined) {
+      this.validateEnum(taskData.status, 'status', ['todo', 'in_progress', 'review', 'done', 'blocked'], errors);
     }
 
-    if (data.priority !== undefined) {
-      this.validateEnum(data.priority, 'priority', ['low', 'medium', 'high', 'urgent'], errors);
+    if (taskData.priority !== undefined) {
+      this.validateEnum(taskData.priority, 'priority', ['low', 'medium', 'high', 'urgent'], errors);
     }
 
     // Number validations
-    if (data.position !== undefined) {
-      this.validateNumber(data.position, 'position', 0, undefined, errors);
+    if (taskData.position !== undefined) {
+      this.validateNumber(taskData.position, 'position', 0, undefined, errors);
     }
 
-    if (data.estimatedHours !== undefined && data.estimatedHours !== null) {
-      this.validateNumber(data.estimatedHours, 'estimatedHours', 0, 1000, errors);
+    if (taskData.estimatedHours !== undefined && taskData.estimatedHours !== null) {
+      this.validateNumber(taskData.estimatedHours, 'estimatedHours', 0, 1000, errors);
     }
 
-    if (data.actualHours !== undefined && data.actualHours !== null) {
-      this.validateNumber(data.actualHours, 'actualHours', 0, 1000, errors);
+    if (taskData.actualHours !== undefined && taskData.actualHours !== null) {
+      this.validateNumber(taskData.actualHours, 'actualHours', 0, 1000, errors);
     }
 
     // Date validations
-    if (data.dueDate !== undefined && data.dueDate !== null) {
-      this.validateDate(data.dueDate, 'dueDate', errors);
+    if (taskData.dueDate !== undefined && taskData.dueDate !== null) {
+      this.validateDate(taskData.dueDate, 'dueDate', errors);
     }
 
     // Array validations
-    if (data.tags !== undefined) {
-      this.validateArray(data.tags, 'tags', 0, 20, errors);
-      if (Array.isArray(data.tags)) {
-        data.tags.forEach((tag: any, index: number) => {
+    if (taskData.tags !== undefined) {
+      this.validateArray(taskData.tags, 'tags', 0, 20, errors);
+      if (Array.isArray(taskData.tags)) {
+        taskData.tags.forEach((tag: unknown, index: number) => {
           this.validateString(tag, `tags[${index}]`, 1, 50, errors);
         });
       }
@@ -437,50 +665,57 @@ export class TaskValidator extends BaseValidator implements ITaskValidator {
     return this.createValidationResult(errors);
   }
 
-  validateUpdate(data: any): ValidationResult {
+  validateUpdate(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
+
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const taskData = data as any;
 
     // Optional validations
-    if (data.title !== undefined) {
-      this.validateString(data.title, 'title', 1, 200, errors);
+    if (taskData.title !== undefined) {
+      this.validateString(taskData.title, 'title', 1, 200, errors);
     }
 
-    if (data.description !== undefined && data.description !== null) {
-      this.validateString(data.description, 'description', 0, 5000, errors);
+    if (taskData.description !== undefined && taskData.description !== null) {
+      this.validateString(taskData.description, 'description', 0, 5000, errors);
     }
 
-    if (data.assigneeId !== undefined && data.assigneeId !== null) {
-      this.validateUuid(data.assigneeId, 'assigneeId', errors);
+    if (taskData.assigneeId !== undefined && taskData.assigneeId !== null) {
+      this.validateUuid(taskData.assigneeId, 'assigneeId', errors);
     }
 
-    if (data.status !== undefined) {
-      this.validateEnum(data.status, 'status', ['todo', 'in_progress', 'review', 'done', 'blocked'], errors);
+    if (taskData.status !== undefined) {
+      this.validateEnum(taskData.status, 'status', ['todo', 'in_progress', 'review', 'done', 'blocked'], errors);
     }
 
-    if (data.priority !== undefined) {
-      this.validateEnum(data.priority, 'priority', ['low', 'medium', 'high', 'urgent'], errors);
+    if (taskData.priority !== undefined) {
+      this.validateEnum(taskData.priority, 'priority', ['low', 'medium', 'high', 'urgent'], errors);
     }
 
-    if (data.position !== undefined) {
-      this.validateNumber(data.position, 'position', 0, undefined, errors);
+    if (taskData.position !== undefined) {
+      this.validateNumber(taskData.position, 'position', 0, undefined, errors);
     }
 
-    if (data.estimatedHours !== undefined && data.estimatedHours !== null) {
-      this.validateNumber(data.estimatedHours, 'estimatedHours', 0, 1000, errors);
+    if (taskData.estimatedHours !== undefined && taskData.estimatedHours !== null) {
+      this.validateNumber(taskData.estimatedHours, 'estimatedHours', 0, 1000, errors);
     }
 
-    if (data.actualHours !== undefined && data.actualHours !== null) {
-      this.validateNumber(data.actualHours, 'actualHours', 0, 1000, errors);
+    if (taskData.actualHours !== undefined && taskData.actualHours !== null) {
+      this.validateNumber(taskData.actualHours, 'actualHours', 0, 1000, errors);
     }
 
-    if (data.dueDate !== undefined && data.dueDate !== null) {
-      this.validateDate(data.dueDate, 'dueDate', errors);
+    if (taskData.dueDate !== undefined && taskData.dueDate !== null) {
+      this.validateDate(taskData.dueDate, 'dueDate', errors);
     }
 
-    if (data.tags !== undefined) {
-      this.validateArray(data.tags, 'tags', 0, 20, errors);
-      if (Array.isArray(data.tags)) {
-        data.tags.forEach((tag: any, index: number) => {
+    if (taskData.tags !== undefined) {
+      this.validateArray(taskData.tags, 'tags', 0, 20, errors);
+      if (Array.isArray(taskData.tags)) {
+        taskData.tags.forEach((tag: unknown, index: number) => {
           this.validateString(tag, `tags[${index}]`, 1, 50, errors);
         });
       }
@@ -489,104 +724,132 @@ export class TaskValidator extends BaseValidator implements ITaskValidator {
     return this.createValidationResult(errors);
   }
 
-  validateMove(data: any): ValidationResult {
+  validateMove(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    this.validateRequired(data.taskId, 'taskId', errors);
-    this.validateRequired(data.columnId, 'columnId', errors);
-    this.validateRequired(data.position, 'position', errors);
-
-    if (data.taskId !== undefined) {
-      this.validateUuid(data.taskId, 'taskId', errors);
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.columnId !== undefined) {
-      this.validateUuid(data.columnId, 'columnId', errors);
+    const moveData = data as any;
+
+    this.validateRequired(moveData.taskId, 'taskId', errors);
+    this.validateRequired(moveData.columnId, 'columnId', errors);
+    this.validateRequired(moveData.position, 'position', errors);
+
+    if (moveData.taskId !== undefined) {
+      this.validateUuid(moveData.taskId, 'taskId', errors);
     }
 
-    if (data.position !== undefined) {
-      this.validateNumber(data.position, 'position', 0, undefined, errors);
+    if (moveData.columnId !== undefined) {
+      this.validateUuid(moveData.columnId, 'columnId', errors);
+    }
+
+    if (moveData.position !== undefined) {
+      this.validateNumber(moveData.position, 'position', 0, undefined, errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateDependency(data: any): ValidationResult {
+  validateDependency(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    this.validateRequired(data.taskId, 'taskId', errors);
-    this.validateRequired(data.dependsOnTaskId, 'dependsOnTaskId', errors);
-    this.validateRequired(data.type, 'type', errors);
-
-    if (data.taskId !== undefined) {
-      this.validateUuid(data.taskId, 'taskId', errors);
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.dependsOnTaskId !== undefined) {
-      this.validateUuid(data.dependsOnTaskId, 'dependsOnTaskId', errors);
+    const dependencyData = data as any;
+
+    this.validateRequired(dependencyData.taskId, 'taskId', errors);
+    this.validateRequired(dependencyData.dependsOnTaskId, 'dependsOnTaskId', errors);
+    this.validateRequired(dependencyData.type, 'type', errors);
+
+    if (dependencyData.taskId !== undefined) {
+      this.validateUuid(dependencyData.taskId, 'taskId', errors);
     }
 
-    if (data.type !== undefined) {
-      this.validateEnum(data.type, 'type', ['blocks', 'blocked_by', 'relates_to', 'duplicates'], errors);
+    if (dependencyData.dependsOnTaskId !== undefined) {
+      this.validateUuid(dependencyData.dependsOnTaskId, 'dependsOnTaskId', errors);
+    }
+
+    if (dependencyData.type !== undefined) {
+      this.validateEnum(dependencyData.type, 'type', ['blocks', 'blocked_by', 'relates_to', 'duplicates'], errors);
     }
 
     // Prevent self-dependency
-    if (data.taskId === data.dependsOnTaskId) {
+    if (dependencyData.taskId === dependencyData.dependsOnTaskId) {
       this.addError(errors, 'dependsOnTaskId', 'Task cannot depend on itself', 'SELF_DEPENDENCY');
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateComment(data: any): ValidationResult {
+  validateComment(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    this.validateRequired(data.content, 'content', errors);
-    this.validateRequired(data.taskId, 'taskId', errors);
-    this.validateRequired(data.authorId, 'authorId', errors);
-
-    if (data.content !== undefined) {
-      this.validateString(data.content, 'content', 1, 2000, errors);
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.taskId !== undefined) {
-      this.validateUuid(data.taskId, 'taskId', errors);
+    const commentData = data as any;
+
+    this.validateRequired(commentData.content, 'content', errors);
+    this.validateRequired(commentData.taskId, 'taskId', errors);
+    this.validateRequired(commentData.authorId, 'authorId', errors);
+
+    if (commentData.content !== undefined) {
+      this.validateString(commentData.content, 'content', 1, 2000, errors);
     }
 
-    if (data.authorId !== undefined) {
-      this.validateUuid(data.authorId, 'authorId', errors);
+    if (commentData.taskId !== undefined) {
+      this.validateUuid(commentData.taskId, 'taskId', errors);
     }
 
-    if (data.parentCommentId !== undefined && data.parentCommentId !== null) {
-      this.validateUuid(data.parentCommentId, 'parentCommentId', errors);
+    if (commentData.authorId !== undefined) {
+      this.validateUuid(commentData.authorId, 'authorId', errors);
+    }
+
+    if (commentData.parentCommentId !== undefined && commentData.parentCommentId !== null) {
+      this.validateUuid(commentData.parentCommentId, 'parentCommentId', errors);
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateAttachment(data: any): ValidationResult {
+  validateAttachment(data: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    this.validateRequired(data.fileName, 'fileName', errors);
-    this.validateRequired(data.fileSize, 'fileSize', errors);
-    this.validateRequired(data.mimeType, 'mimeType', errors);
-    this.validateRequired(data.url, 'url', errors);
-
-    if (data.fileName !== undefined) {
-      this.validateString(data.fileName, 'fileName', 1, 255, errors);
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.fileSize !== undefined) {
-      this.validateNumber(data.fileSize, 'fileSize', 1, 100 * 1024 * 1024, errors); // Max 100MB
+    const attachmentData = data as any;
+
+    this.validateRequired(attachmentData.fileName, 'fileName', errors);
+    this.validateRequired(attachmentData.fileSize, 'fileSize', errors);
+    this.validateRequired(attachmentData.mimeType, 'mimeType', errors);
+    this.validateRequired(attachmentData.url, 'url', errors);
+
+    if (attachmentData.fileName !== undefined) {
+      this.validateString(attachmentData.fileName, 'fileName', 1, 255, errors);
     }
 
-    if (data.mimeType !== undefined) {
-      this.validateString(data.mimeType, 'mimeType', 1, 100, errors);
+    if (attachmentData.fileSize !== undefined) {
+      this.validateNumber(attachmentData.fileSize, 'fileSize', 1, 100 * 1024 * 1024, errors); // Max 100MB
     }
 
-    if (data.url !== undefined) {
-      this.validateString(data.url, 'url', 1, 500, errors);
-      this.validateUrl(data.url, 'url', errors);
+    if (attachmentData.mimeType !== undefined) {
+      this.validateString(attachmentData.mimeType, 'mimeType', 1, 100, errors);
+    }
+
+    if (attachmentData.url !== undefined) {
+      this.validateString(attachmentData.url, 'url', 1, 500, errors);
+      this.validateUrl(attachmentData.url, 'url', errors);
     }
 
     return this.createValidationResult(errors);
@@ -615,51 +878,227 @@ export class TaskValidator extends BaseValidator implements ITaskValidator {
     validator.validateDate(dueDate, 'dueDate', errors);
     return validator.createValidationResult(errors);
   }
-}
 
-// User Validator
-export class UserValidator extends BaseValidator implements IUserValidator {
-  validateCreate(data: any): ValidationResult {
+  validateId(id: string): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    this.validateRequired(id, 'id', errors);
+    if (id !== undefined) {
+      this.validateString(id, 'id', 1, undefined, errors);
+      this.validateUuid(id, 'id', errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+
+  validateSearchFilters(filters: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
-    // Required fields
-    this.validateRequired(data.email, 'email', errors);
-    this.validateRequired(data.name, 'name', errors);
-
-    // String validations
-    if (data.email !== undefined) {
-      this.validateString(data.email, 'email', 1, 255, errors);
-      this.validateEmail(data.email, 'email', errors);
+    if (filters === undefined || filters === null) {
+      return this.createValidationResult(errors);
     }
 
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 100, errors);
+    if (typeof filters !== 'object') {
+      this.addError(errors, 'filters', 'Filters must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
     }
 
-    if (data.avatar !== undefined && data.avatar !== null) {
-      this.validateString(data.avatar, 'avatar', 1, 500, errors);
-      this.validateUrl(data.avatar, 'avatar', errors);
+    const f = filters as Record<string, unknown>;
+
+    // Validate status filter
+    if (f.status !== undefined) {
+      if (Array.isArray(f.status)) {
+        f.status.forEach((status: unknown, index: number) => {
+          this.validateEnum(status, `status[${index}]`, ['todo', 'in_progress', 'review', 'done', 'blocked'], errors);
+        });
+      } else {
+        this.validateEnum(f.status, 'status', ['todo', 'in_progress', 'review', 'done', 'blocked'], errors);
+      }
+    }
+
+    // Validate priority filter
+    if (f.priority !== undefined) {
+      if (Array.isArray(f.priority)) {
+        f.priority.forEach((priority: unknown, index: number) => {
+          this.validateEnum(priority, `priority[${index}]`, ['low', 'medium', 'high', 'urgent'], errors);
+        });
+      } else {
+        this.validateEnum(f.priority, 'priority', ['low', 'medium', 'high', 'urgent'], errors);
+      }
+    }
+
+    // Validate assigneeId filter
+    if (f.assigneeId !== undefined) {
+      if (Array.isArray(f.assigneeId)) {
+        f.assigneeId.forEach((id: unknown, index: number) => {
+          if (typeof id === 'string') {
+            this.validateUuid(id, `assigneeId[${index}]`, errors);
+          } else {
+            this.addError(errors, `assigneeId[${index}]`, 'assigneeId must be a string', 'INVALID_TYPE');
+          }
+        });
+      } else {
+        if (typeof f.assigneeId === 'string') {
+          this.validateUuid(f.assigneeId, 'assigneeId', errors);
+        } else {
+          this.addError(errors, 'assigneeId', 'assigneeId must be a string', 'INVALID_TYPE');
+        }
+      }
+    }
+
+    // Validate tags filter
+    if (f.tags !== undefined) {
+      this.validateArray(f.tags, 'tags', 0, 20, errors);
+      if (Array.isArray(f.tags)) {
+        f.tags.forEach((tag: unknown, index: number) => {
+          this.validateString(tag, `tags[${index}]`, 1, 50, errors);
+        });
+      }
+    }
+
+    // Validate date filters
+    if (f.dueDateFrom !== undefined && f.dueDateFrom !== null) {
+      this.validateDate(f.dueDateFrom, 'dueDateFrom', errors);
+    }
+
+    if (f.dueDateTo !== undefined && f.dueDateTo !== null) {
+      this.validateDate(f.dueDateTo, 'dueDateTo', errors);
+    }
+
+    // Validate createdAt filters
+    if (f.createdAtFrom !== undefined && f.createdAtFrom !== null) {
+      this.validateDate(f.createdAtFrom, 'createdAtFrom', errors);
+    }
+
+    if (f.createdAtTo !== undefined && f.createdAtTo !== null) {
+      this.validateDate(f.createdAtTo, 'createdAtTo', errors);
+    }
+
+    // Validate includeArchived
+    if (f.includeArchived !== undefined) {
+      if (typeof f.includeArchived !== 'boolean') {
+        this.addError(errors, 'includeArchived', 'includeArchived must be a boolean', 'INVALID_TYPE');
+      }
     }
 
     return this.createValidationResult(errors);
   }
 
-  validateUpdate(data: any): ValidationResult {
+  validateSortOptions(sort: unknown): ValidationResult {
     const errors: ValidationError[] = [];
 
+    if (sort === undefined || sort === null) {
+      return this.createValidationResult(errors);
+    }
+
+    if (typeof sort !== 'object') {
+      this.addError(errors, 'sort', 'Sort options must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const s = sort as Record<string, unknown>;
+
+    // Validate field
+    if (s.field !== undefined) {
+      this.validateEnum(s.field, 'field', [
+        'title', 'status', 'priority', 'assigneeId', 'dueDate', 
+        'createdAt', 'updatedAt', 'position', 'estimatedHours', 'actualHours'
+      ], errors);
+    }
+
+    // Validate direction
+    if (s.direction !== undefined) {
+      this.validateEnum(s.direction, 'direction', ['asc', 'desc'], errors);
+    }
+
+    return this.createValidationResult(errors);
+  }
+
+  validatePaginationOptions(pagination: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+
+    if (pagination === undefined || pagination === null) {
+      return this.createValidationResult(errors);
+    }
+
+    if (typeof pagination !== 'object') {
+      this.addError(errors, 'pagination', 'Pagination options must be an object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const p = pagination as Record<string, unknown>;
+
+    // Validate limit
+    if (p.limit !== undefined) {
+      this.validateNumber(p.limit, 'pagination.limit', 1, 100, errors);
+    }
+
+    // Validate offset
+    if (p.offset !== undefined) {
+      this.validateNumber(p.offset, 'pagination.offset', 0, undefined, errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
+}
+
+// User Validator
+export class UserValidator extends BaseValidator implements IUserValidator {
+  validateCreate(data: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const userData = data as any;
+
+    // Required fields
+    this.validateRequired(userData.email, 'email', errors);
+    this.validateRequired(userData.name, 'name', errors);
+
+    // String validations
+    if (userData.email !== undefined) {
+      this.validateString(userData.email, 'email', 1, 255, errors);
+      super.validateEmail(userData.email, 'email', errors);
+    }
+
+    if (userData.name !== undefined) {
+      this.validateString(userData.name, 'name', 1, 100, errors);
+    }
+
+    if (userData.avatar !== undefined && userData.avatar !== null) {
+      this.validateString(userData.avatar, 'avatar', 1, 500, errors);
+      this.validateUrl(userData.avatar, 'avatar', errors);
+    }
+
+    return this.createValidationResult(errors);
+  }
+
+  validateUpdate(data: unknown): ValidationResult {
+    const errors: ValidationError[] = [];
+
+    if (!data || typeof data !== 'object') {
+      this.addError(errors, 'data', 'Invalid data object', 'INVALID_TYPE');
+      return this.createValidationResult(errors);
+    }
+
+    const userData = data as any;
+
     // Optional validations
-    if (data.email !== undefined) {
-      this.validateString(data.email, 'email', 1, 255, errors);
-      this.validateEmail(data.email, 'email', errors);
+    if (userData.email !== undefined) {
+      this.validateString(userData.email, 'email', 1, 255, errors);
+      super.validateEmail(userData.email, 'email', errors);
     }
 
-    if (data.name !== undefined) {
-      this.validateString(data.name, 'name', 1, 100, errors);
+    if (userData.name !== undefined) {
+      this.validateString(userData.name, 'name', 1, 100, errors);
     }
 
-    if (data.avatar !== undefined && data.avatar !== null) {
-      this.validateString(data.avatar, 'avatar', 1, 500, errors);
-      this.validateUrl(data.avatar, 'avatar', errors);
+    if (userData.avatar !== undefined && userData.avatar !== null) {
+      this.validateString(userData.avatar, 'avatar', 1, 500, errors);
+      this.validateUrl(userData.avatar, 'avatar', errors);
     }
 
     return this.createValidationResult(errors);
@@ -703,6 +1142,18 @@ export class UserValidator extends BaseValidator implements IUserValidator {
 
     return this.createValidationResult(errors);
   }
+
+  validateId(id: string): ValidationResult {
+    const errors: ValidationError[] = [];
+    
+    this.validateRequired(id, 'id', errors);
+    if (id !== undefined) {
+      this.validateString(id, 'id', 1, undefined, errors);
+      this.validateUuid(id, 'id', errors);
+    }
+    
+    return this.createValidationResult(errors);
+  }
 }
 
 // Export validator instances
@@ -714,7 +1165,7 @@ export const userValidator = new UserValidator();
 // Export validation helper functions
 export function validateId(id: string): ValidationResult {
   const errors: ValidationError[] = [];
-  const validator = new BaseValidator();
+  const validator = new ProjectValidator();
   
   validator['validateRequired'](id, 'id', errors);
   if (id !== undefined) {
@@ -726,7 +1177,7 @@ export function validateId(id: string): ValidationResult {
 
 export function validatePagination(page?: number, limit?: number): ValidationResult {
   const errors: ValidationError[] = [];
-  const validator = new BaseValidator();
+  const validator = new ProjectValidator();
   
   if (page !== undefined) {
     validator['validateNumber'](page, 'page', 1, 1000, errors);
@@ -741,7 +1192,7 @@ export function validatePagination(page?: number, limit?: number): ValidationRes
 
 export function validateSearchQuery(query?: string): ValidationResult {
   const errors: ValidationError[] = [];
-  const validator = new BaseValidator();
+  const validator = new ProjectValidator();
   
   if (query !== undefined && query !== null && query !== '') {
     validator['validateString'](query, 'query', 1, 500, errors);

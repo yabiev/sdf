@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAuth, requireAdmin } from '@/lib/auth';
-import databaseAdapter from '@/lib/database-adapter-optimized';
+import { DatabaseAdapter } from '@/lib/database-adapter';
+
+const databaseAdapter = DatabaseAdapter.getInstance();
 
 // Обновление пользователя (роль, статус)
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = await verifyAuth(request);
@@ -38,9 +40,9 @@ export async function PUT(
     }
 
     // Подготовка данных для обновления
-    const updates: any = {};
+    const updates: { role?: 'admin' | 'manager' | 'user'; isApproved?: boolean } = {};
     if (role !== undefined) {
-      updates.role = role;
+      updates.role = role as 'admin' | 'manager' | 'user';
     }
     if (status !== undefined) {
       if (status === 'approved') {
@@ -66,11 +68,11 @@ export async function PUT(
       name: updatedUser.name,
       email: updatedUser.email,
       role: updatedUser.role,
-      status: updatedUser.is_active ? 'active' : 'inactive',
+      status: updatedUser.isApproved ? 'active' : 'inactive',
       avatar: updatedUser.avatar || null,
       createdAt: updatedUser.created_at,
       updatedAt: updatedUser.updated_at,
-      lastLoginAt: updatedUser.last_login_at
+      lastLoginAt: updatedUser.lastLoginAt
     };
 
     return NextResponse.json({ user: userResult });
@@ -87,7 +89,7 @@ export async function PUT(
 // Удаление пользователя
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const authResult = await verifyAuth(request);

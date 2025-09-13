@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAuth, requireAdmin } from '@/lib/auth';
-import databaseAdapter from '@/lib/database-adapter-optimized';
-import bcrypt from 'bcryptjs';
+import { DatabaseAdapter } from '@/lib/database-adapter';
+
+const databaseAdapter = DatabaseAdapter.getInstance();
 
 // Получение списка пользователей
 export async function GET(request: NextRequest) {
@@ -14,7 +15,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const userId = authResult.user!.userId;
     const role = authResult.user!.role;
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -26,12 +26,16 @@ export async function GET(request: NextRequest) {
     // Фильтрация пользователей в зависимости от роли
     let filteredUsers = allUsers;
     if (role !== 'admin') {
-      filteredUsers = allUsers.filter(user => user.status === 'active');
+      filteredUsers = allUsers.filter(user => user.isApproved === true);
     }
     
     // Фильтрация по статусу
     if (status && role === 'admin') {
-      filteredUsers = filteredUsers.filter(user => user.status === status);
+      if (status === 'active') {
+        filteredUsers = filteredUsers.filter(user => user.isApproved === true);
+      } else {
+        filteredUsers = filteredUsers.filter(user => user.isApproved !== true);
+      }
     }
     
     // Фильтрация по проекту (если указан)
@@ -42,16 +46,16 @@ export async function GET(request: NextRequest) {
     
     // Преобразование в формат API с правильной типизацией
     const users = filteredUsers.map(user => {
-      const userResult = {
+      const userResult: any = {
         id: String(user.id), // Оставляем ID как строку для совместимости
         name: user.name,
         email: user.email,
         role: user.role,
-        status: user.is_active ? 'active' : 'inactive',
-        avatar: user.avatar_url || null,
+        status: user.isApproved ? 'active' : 'inactive',
+        avatar: user.avatar || null,
         createdAt: user.created_at,
         updatedAt: user.updated_at,
-        lastLoginAt: user.last_login_at
+        lastLoginAt: user.lastLoginAt
       };
 
       if (includeStats) {
@@ -100,8 +104,7 @@ export async function POST(request: NextRequest) {
       name,
       email,
       password,
-      role = 'user',
-      status = 'active'
+      role = 'user'
     } = await request.json();
 
     if (!name || !email || !password) {
@@ -128,14 +131,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Создание пользователя (пароль будет хеширован в createUser)
-    const user = await databaseAdapter.createUser(email.toLowerCase(), password, name, role);
+    const user = await databaseAdapter.createUser({
+      email: email.toLowerCase(),
+      password_hash: password, // Будет хеширован в адаптере
+      name,
+      role,
+      isApproved: false,
+      avatar: undefined
+    });
 
     const createdUser = {
       id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,
-      status: user.is_active ? 'active' : 'inactive',
+      status: user.isApproved ? 'active' : 'inactive',
       avatar: user.avatar || null,
       createdAt: user.created_at,
       updatedAt: user.updated_at

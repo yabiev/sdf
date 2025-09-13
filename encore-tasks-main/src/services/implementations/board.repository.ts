@@ -19,12 +19,13 @@ import {
 } from '../../types/board.types';
 
 import { IBoardRepository } from '../interfaces/board.service.interface';
+import { DatabaseAdapter } from '../../lib/database-adapter';
 
 /**
  * Реализация репозитория досок для работы с базой данных
  */
 export class BoardRepository implements IBoardRepository {
-  constructor(private readonly databaseAdapter: any) {}
+  constructor(private readonly databaseAdapter: DatabaseAdapter) {}
 
   async findById(id: BoardId): Promise<Board | null> {
     try {
@@ -42,7 +43,7 @@ export class BoardRepository implements IBoardRepository {
           created_at as createdAt,
           updated_at as updatedAt
         FROM boards 
-        WHERE id = ?
+        WHERE id = $1
       `;
       
       const result = await this.databaseAdapter.query(query, [id]);
@@ -74,28 +75,29 @@ export class BoardRepository implements IBoardRepository {
           created_at as createdAt,
           updated_at as updatedAt
         FROM boards 
-        WHERE project_id = ?
+        WHERE project_id = $1
       `;
       
-      const params: any[] = [projectId];
+      const params: unknown[] = [projectId];
+      let paramIndex = 2;
       
       // Применяем фильтры
       if (filters) {
         if (filters.visibility) {
-          query += ` AND visibility = ?`;
+          query += ` AND visibility = $${paramIndex++}`;
           params.push(filters.visibility);
         }
         
         if (filters.createdBy) {
-          query += ` AND created_by = ?`;
+          query += ` AND created_by = $${paramIndex++}`;
           params.push(filters.createdBy);
         }
         
         // Архивирование не поддерживается в текущей схеме PostgreSQL
         
-        if (filters.search) {
-          query += ` AND name LIKE ?`;
-          const searchTerm = `%${filters.search}%`;
+        if (filters.query) {
+          query += ` AND name LIKE $${paramIndex++}`;
+          const searchTerm = `%${filters.query}%`;
           params.push(searchTerm);
         }
       }
@@ -104,7 +106,7 @@ export class BoardRepository implements IBoardRepository {
       
       const results = await this.databaseAdapter.query(query, params);
       
-      return results.map((row: any) => this.mapRowToBoard(row));
+      return results.map((row: Record<string, unknown>) => this.mapRowToBoard(row));
     } catch (error) {
       console.error('Error finding boards by project:', error);
       throw new Error(`Failed to find boards: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -134,14 +136,16 @@ export class BoardRepository implements IBoardRepository {
         WHERE 1=1
       `;
       
-      const params: any[] = [];
+      const params: unknown[] = [];
       let paramIndex = 1;
       
       // Применяем фильтры
       if (filters) {
-        if (filters.projectId) {
-          query += ` AND project_id = $${paramIndex++}`;
-          params.push(filters.projectId);
+        if (filters.projectIds && filters.projectIds.length > 0) {
+          const placeholders = filters.projectIds.map((_, index) => `$${paramIndex + index}`).join(', ');
+          query += ` AND project_id IN (${placeholders})`;
+          params.push(...filters.projectIds);
+          paramIndex += filters.projectIds.length;
         }
         
         if (filters.visibility) {
@@ -156,9 +160,9 @@ export class BoardRepository implements IBoardRepository {
         
         // Архивирование не поддерживается в текущей схеме PostgreSQL
         
-        if (filters.search) {
+        if (filters.query) {
           query += ` AND name LIKE $${paramIndex++}`;
-          const searchTerm = `%${filters.search}%`;
+          const searchTerm = `%${filters.query}%`;
           params.push(searchTerm);
         }
       }
@@ -184,7 +188,7 @@ export class BoardRepository implements IBoardRepository {
       }
       
       const results = await this.databaseAdapter.query(query, params);
-      const boards = results.map((row: any) => this.mapRowToBoard(row));
+      const boards = results.map((row: Record<string, unknown>) => this.mapRowToBoard(row));
       
       const totalPages = pagination ? Math.ceil(total / pagination.limit) : 1;
       const currentPage = pagination?.page || 1;
@@ -257,10 +261,10 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async update(id: BoardId, boardData: UpdateBoardDto, updatedBy: UserId): Promise<Board | null> {
+  async update(id: BoardId, boardData: UpdateBoardDto): Promise<Board | null> {
     try {
       const updateFields: string[] = [];
-      const params: any[] = [];
+      const params: unknown[] = [];
       
       let paramIndex = 1;
       
@@ -334,7 +338,7 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async archive(id: BoardId, archivedBy: UserId): Promise<boolean> {
+  async archive(id: BoardId): Promise<boolean> {
     try {
       // Архивирование не поддерживается в текущей схеме PostgreSQL
       // Вместо этого просто удаляем доску
@@ -345,7 +349,7 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async restore(id: BoardId, restoredBy: UserId): Promise<boolean> {
+  async restore(): Promise<boolean> {
     try {
       // Восстановление не поддерживается в текущей схеме PostgreSQL
       return false;
@@ -355,7 +359,7 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async updatePosition(id: BoardId, newPosition: number): Promise<boolean> {
+  async updatePosition(): Promise<boolean> {
     try {
       // Позиционирование не поддерживается в текущей схеме PostgreSQL
       return true;
@@ -365,7 +369,7 @@ export class BoardRepository implements IBoardRepository {
     }
   }
 
-  async getMaxPosition(projectId: ProjectId): Promise<number> {
+  async getMaxPosition(): Promise<number> {
     try {
       // Позиционирование не поддерживается в текущей схеме PostgreSQL
       return 0;
@@ -377,11 +381,12 @@ export class BoardRepository implements IBoardRepository {
 
   async existsByName(name: string, projectId: ProjectId, excludeId?: BoardId): Promise<boolean> {
     try {
-      let query = 'SELECT COUNT(*) as count FROM boards WHERE name = ? AND project_id = ?';
-      const params: any[] = [name, projectId];
+      let query = 'SELECT COUNT(*) as count FROM boards WHERE name = $1 AND project_id = $2';
+      const params: unknown[] = [name, projectId];
+      let paramIndex = 3;
       
       if (excludeId) {
-        query += ' AND id != ?';
+        query += ` AND id != $${paramIndex++}`;
         params.push(excludeId);
       }
       
@@ -396,7 +401,7 @@ export class BoardRepository implements IBoardRepository {
 
   async countByProject(projectId: ProjectId): Promise<number> {
     try {
-      const query = 'SELECT COUNT(*) as count FROM boards WHERE project_id = ?';
+      const query = 'SELECT COUNT(*) as count FROM boards WHERE project_id = $1';
       const result = await this.databaseAdapter.query(query, [projectId]);
       
       return result[0]?.count || 0;
@@ -417,49 +422,44 @@ export class BoardRepository implements IBoardRepository {
     const now = new Date();
     
     for (const column of defaultColumns) {
-      const columnId = this.generateId();
       const query = `
         INSERT INTO columns (
-          id, name, board_id, position, color, settings, 
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          title, board_id, position, color, 
+          created_by, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       `;
       
-      const defaultColumnSettings = {
-        allowTaskCreation: true,
-        autoMoveRules: []
-      };
+
       
       await this.databaseAdapter.query(query, [
-        columnId,
         column.title,
         boardId,
         column.position,
         column.color,
-        JSON.stringify(defaultColumnSettings),
+        createdBy,
         now.toISOString(),
         now.toISOString()
       ]);
     }
   }
 
-  private mapRowToBoard(row: any): Board {
+  private mapRowToBoard(row: Record<string, unknown>): Board {
     return {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      projectId: row.projectId,
+      id: row.id as string,
+      name: row.name as string,
+      description: row.description as string | undefined,
+      projectId: row.projectId as string,
       visibility: row.visibility as BoardVisibility,
-      settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings,
-      icon: row.icon,
-      color: row.color,
-      position: row.position,
-      createdBy: row.createdBy,
-      updatedBy: row.updatedBy,
-      createdAt: new Date(row.createdAt),
-      updatedAt: new Date(row.updatedAt),
+      settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings as BoardSettings,
+      icon: row.icon as string | undefined,
+      color: row.color as string | undefined,
+      position: row.position as number,
+      createdBy: row.createdBy as string,
+      updatedBy: row.updatedBy as string | undefined,
+      createdAt: new Date(row.createdAt as string | Date),
+      updatedAt: new Date(row.updatedAt as string | Date),
       isArchived: Boolean(row.isArchived),
-      archivedAt: row.archivedAt ? new Date(row.archivedAt) : undefined
+      archivedAt: row.archivedAt ? new Date(row.archivedAt as string | Date) : undefined
     };
   }
 
@@ -477,6 +477,6 @@ export class BoardRepository implements IBoardRepository {
   }
 
   private generateId(): string {
-    // Import crypto for UUID generation
-    const crypto = require('crypto');
-    return crypto.rando
+    return `board_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+}

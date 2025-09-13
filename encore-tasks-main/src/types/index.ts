@@ -4,9 +4,11 @@ export interface User {
   email: string;
   avatar?: string;
   role: 'admin' | 'manager' | 'user';
-  isApproved: boolean;
-  createdAt: Date;
-  password?: string;
+  isApproved?: boolean;
+  lastLoginAt?: string;
+  created_at: string;
+  updated_at: string;
+  password_hash?: string;
 }
 
 export interface UserRole {
@@ -21,14 +23,30 @@ export interface Permission {
   description: string;
 }
 
+export interface ProjectMember {
+  userId: string;
+  role: 'owner' | 'admin' | 'member' | 'viewer';
+  joinedAt: string;
+  isApproved?: boolean;
+  permissions?: {
+    canCreateBoards: boolean;
+    canEditProject: boolean;
+    canManageMembers: boolean;
+    canDeleteProject: boolean;
+    canArchiveProject: boolean;
+  };
+}
+
 export interface Project {
   id: string;
   name: string;
   description?: string;
   color: string;
-  members: User[];
-  createdBy: string;
-  createdAt: Date;
+  icon_url?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  members?: ProjectMember[];
   telegramChatId?: string;
   telegramTopicId?: string;
 }
@@ -39,23 +57,29 @@ export interface Task {
   description?: string;
   status: TaskStatus;
   priority: TaskPriority;
-  assignee?: User; // Deprecated: use assignees instead
-  assignees: User[];
-  reporter: User;
-  projectId: string;
-  boardId: string;
-  parentTaskId?: string;
-  subtasks: Task[];
-  deadline?: Date;
-  attachments: Attachment[];
-  comments: Comment[];
-  tags: string[];
-  createdAt: Date;
-  updatedAt: Date;
+  project_id?: string;
+  board_id?: string;
+  column_id?: string;
+  assignee_id?: string;
+  reporter_id?: string;
   position: number;
-  isArchived?: boolean;
-  archivedAt?: Date;
-  completedAt?: Date;
+  created_at: string;
+  updated_at: string;
+  due_date?: string;
+  column_name?: string;
+  board_name?: string;
+  project_name?: string;
+  creator_id?: string;
+  creator_username?: string;
+  assignees?: User[];
+  tags?: string[];
+  settings?: {
+    notifications_enabled: boolean;
+    auto_archive: boolean;
+    time_tracking: boolean;
+  };
+  attachments?: Attachment[];
+  comments?: Comment[];
 }
 
 export interface Attachment {
@@ -79,22 +103,24 @@ export interface Comment {
 export interface Board {
   id: string;
   name: string;
-  projectId: string;
-  columns: Column[];
-  icon?: string;
-  createdAt: Date;
+  description?: string;
+  project_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Column {
   id: string;
   name: string;
-  title: string; // Добавляем title для совместимости
-  tasks: Task[];
+  board_id: string;
   position: number;
   color?: string;
+  created_at: string;
+  updated_at: string;
 }
 
-export type TaskStatus = "todo" | "in-progress" | "review" | "done" | "archived";
+export type TaskStatus = "todo" | "in_progress" | "review" | "done" | "blocked";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
 export interface NotificationSettings {
@@ -119,8 +145,8 @@ export interface TaskAction {
   newValue?: string;
   changes?: {
     field: string;
-    oldValue: any;
-    newValue: any;
+    oldValue: string | number | boolean | Date | null;
+    newValue: string | number | boolean | Date | null;
   }[];
 }
 
@@ -128,8 +154,8 @@ export interface Session {
   id: string;
   token: string;
   user_id: string;
-  expires_at: Date;
-  created_at: Date;
+  expires_at: string;
+  created_at: string;
 }
 
 export interface DragEndEvent {

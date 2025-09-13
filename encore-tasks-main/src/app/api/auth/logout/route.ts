@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
-import databaseAdapter from '@/lib/database-adapter-optimized';
+import { DatabaseAdapter } from '@/lib/database-adapter';
+
+const databaseAdapter = DatabaseAdapter.getInstance();
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +13,7 @@ export async function POST(request: NextRequest) {
     if (token) {
       try {
         // Проверка и декодирование токена
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any;
+        jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as { userId: string };
         
         // Удаление сессии из базы данных
         await databaseAdapter.deleteSession(token);

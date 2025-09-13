@@ -4,6 +4,7 @@ import React, { createContext, useContext, useReducer, ReactNode, useEffect, use
 import { Task, Project, User, Board, Column, TaskStatus, TaskAction } from "@/types";
 import { generateId } from "@/lib/utils";
 import { api, type User as ApiUser, type Project as ApiProject, type Board as ApiBoard, type Task as ApiTask } from "@/lib/api";
+import { projectService } from "@/services";
 
 // Helper function to create notifications
 function createNotification(
@@ -199,8 +200,9 @@ const convertApiUserToUser = (apiUser: ApiUser): User => ({
   name: apiUser.name,
   email: apiUser.email,
   role: apiUser.role,
-  isApproved: apiUser.approval_status === 'approved' || apiUser.status === 'approved' || apiUser.role === 'admin',
-  createdAt: new Date(apiUser.createdAt),
+  isApproved: apiUser.approval_status === 'approved' || apiUser.role === 'admin',
+  created_at: apiUser.createdAt,
+  updated_at: apiUser.updatedAt,
   avatar: apiUser.avatar
 });
 
@@ -209,18 +211,23 @@ const convertApiProjectToProject = (apiProject: ApiProject): Project => ({
   name: apiProject.name,
   description: apiProject.description || '',
   color: apiProject.color,
+  icon_url: apiProject.icon || '📋',
   members: [], // Will be loaded separately
-  createdBy: apiProject.createdBy,
-  createdAt: new Date(apiProject.createdAt),
-  telegramChatId: undefined // Will be added later if needed
+  created_by: apiProject.created_by,
+  created_at: apiProject.created_at,
+  updated_at: apiProject.updated_at,
+  telegramChatId: undefined,
+  telegramTopicId: undefined
 });
 
 const convertApiBoardToBoard = (apiBoard: ApiBoard): Board => ({
   id: apiBoard.id,
   name: apiBoard.name,
-  projectId: apiBoard.projectId,
-  columns: [], // Will be loaded separately
-  createdAt: new Date(apiBoard.createdAt)
+  description: apiBoard.description,
+  project_id: apiBoard.projectId,
+  created_by: '', // Default value since API doesn't provide this
+  created_at: apiBoard.createdAt,
+  updated_at: apiBoard.updatedAt
 });
 
 const convertApiTaskToTask = (apiTask: ApiTask): Task => ({
@@ -229,25 +236,16 @@ const convertApiTaskToTask = (apiTask: ApiTask): Task => ({
   description: apiTask.description || '',
   status: apiTask.status as TaskStatus,
   priority: apiTask.priority,
-  assignee: apiTask.assignees?.[0] ? convertApiUserToUser(apiTask.assignees[0]) : undefined,
   assignees: apiTask.assignees?.map(convertApiUserToUser) || [],
-  reporter: {
-    id: apiTask.reporterId,
-    name: apiTask.reporterName,
-    email: '',
-    role: 'user',
-    isApproved: true,
-    createdAt: new Date()
-  },
-  projectId: apiTask.projectId,
-  boardId: apiTask.boardId,
-  subtasks: [], // Will be loaded separately if needed
-  deadline: apiTask.deadline ? new Date(apiTask.deadline) : undefined,
+  reporter_id: apiTask.reporterId,
+  project_id: apiTask.projectId,
+  board_id: apiTask.boardId,
+  due_date: apiTask.deadline,
   attachments: [], // Will be loaded separately if needed
   comments: [], // Will be loaded separately if needed
   tags: apiTask.tags?.map(tag => tag.name) || [],
-  createdAt: new Date(apiTask.createdAt),
-  updatedAt: new Date(apiTask.updatedAt),
+  created_at: apiTask.createdAt,
+  updated_at: apiTask.updatedAt,
   position: apiTask.position
 });
 
@@ -438,7 +436,7 @@ const AppContext = createContext<{
   loadTasks: (params?: { projectId?: string; boardId?: string }) => Promise<void>;
   loadUsers: () => Promise<void>;
   createProject: (projectData: { name: string; description?: string; color?: string }) => Promise<boolean>;
-  createBoard: (boardData: { name: string; description?: string; projectId: string }) => Promise<boolean>;
+  createBoard: (boardData: { name: string; description?: string; project_id: string }) => Promise<boolean>;
   createTask: (taskData: {
     title: string;
     description?: string;
@@ -466,26 +464,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Initialize authentication on app load
   useEffect(() => {
     const initializeAuth = async () => {
+      console.log('🔄 AppProvider: Starting authentication initialization');
       dispatch({ type: "SET_LOADING", payload: true });
       
       try {
         // Check if user is already authenticated
+        console.log('🔍 AppProvider: Calling api.getCurrentUser()');
         const response = await api.getCurrentUser();
+        console.log('📥 AppProvider: getCurrentUser response:', response);
         
         if (response.data?.user && !response.error) {
           const user = convertApiUserToUser(response.data.user);
+          console.log('✅ AppProvider: User authenticated, logging in:', user);
           dispatch({ type: "LOGIN", payload: user });
           
           // Load initial data
-          // await Promise.all([
-          //   loadProjects(),
-          //   loadUsers()
-          // ]);
+          await Promise.all([
+            loadProjects(),
+            loadUsers()
+          ]);
+        } else {
+          console.log('❌ AppProvider: No authenticated user found');
         }
       } catch (error) {
-        console.log('No existing session found');
+        console.log('⚠️ AppProvider: No existing session found:', error);
       } finally {
         dispatch({ type: "SET_LOADING", payload: false });
+        console.log('🏁 AppProvider: Authentication initialization complete');
       }
     };
     
@@ -508,10 +513,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "LOGIN", payload: user });
         
         // Load initial data
-        // await Promise.all([
-        //   loadProjects(),
-        //   loadUsers()
-        // ]);
+        await Promise.all([
+          loadProjects(),
+          loadUsers()
+        ]);
         
         return true;
       }
@@ -565,24 +570,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (response.data?.boards) {
         const boards = response.data.boards.map(convertApiBoardToBoard);
         
-        // Загружаем колонки для каждой доски
-        for (const board of boards) {
-          try {
-            const columnsResponse = await api.getColumns(board.id.toString());
-            if (columnsResponse.data?.columns) {
-              board.columns = columnsResponse.data.columns.map((col: any) => ({
-                id: col.id.toString(), // Convert to string for consistency
-                name: col.name,
-                title: col.name, // Add title for compatibility
-                color: col.color,
-                position: col.position,
-                tasks: [] // Tasks will be loaded separately
-              }));
-            }
-          } catch (error) {
-            console.error(`Failed to load columns for board ${board.id}:`, error);
-          }
-        }
+        // Note: Board interface doesn't include columns property
+        // Columns will be loaded separately when needed
         
         dispatch({ type: "SET_BOARDS", payload: boards });
         
@@ -638,45 +627,166 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [dispatch]);
 
+  // Функция для генерации уникального названия проекта
+  const generateUniqueProjectName = (): string => {
+    const existingProjects = state.projects || [];
+    let counter = 1;
+    const baseName = "Проект";
+    let newName = `${baseName} #${counter}`;
+    
+    while (existingProjects.some(project => project.name === newName)) {
+      counter++;
+      newName = `${baseName} #${counter}`;
+    }
+    
+    console.log(`Автогенерация названия проекта: ${newName}`);
+    return newName;
+  };
+
   const createProject = async (projectData: {
     name: string;
     description?: string;
     color?: string;
+    icon?: string;
+    members?: any[];
+    createdBy?: string;
+    telegramChatId?: string;
+    telegramTopicId?: string;
   }): Promise<boolean> => {
+    console.log('AppContext createProject called with:', projectData);
     try {
-      const response = await api.createProject({
-        ...projectData,
-        color: projectData.color || '#6366f1'
-      });
+      // Автогенерация названия если не указано
+      let projectName = projectData.name?.trim() || '';
+      if (!projectName) {
+        projectName = generateUniqueProjectName();
+        console.log('Автогенерировано название:', projectName);
+      }
       
-      if (response.error) {
-        console.error('Create project error:', response.error);
+      // Prepare data for API - only send fields that API expects
+      const requestData = {
+        name: projectName,
+        color: projectData.color || '#6366f1'
+      };
+      console.log('Calling api.createProject with:', requestData);
+      console.log('API endpoint: /api/projects');
+      
+      const response = await api.createProject(requestData);
+      console.log('Full API Response:', JSON.stringify(response, null, 2));
+      console.log('Response structure check:');
+      console.log('- response.data exists:', !!response.data);
+      console.log('- response.data.success:', response.data?.success);
+      console.log('- response.data.data exists:', !!response.data?.data);
+      
+      if (!response) {
+        console.error('No response from API');
         return false;
       }
       
-      if (response.data?.project) {
-        const project = convertApiProjectToProject(response.data.project);
-        dispatch({ type: "ADD_PROJECT", payload: project });
-        return true;
+      // Check if response has data and success property
+      if (!response.data || !response.data.success) {
+        const errorMessage = response.data?.error || 'Unknown error';
+        console.error('API request failed - Response validation failed:');
+        console.error('- Error message:', errorMessage);
+        console.error('- Full response:', JSON.stringify(response, null, 2));
+        return false;
       }
       
-      return false;
+      // Then check if project data exists
+      if (!response.data.data) {
+        console.error('No project data in API response:', response);
+        console.error('- Response data:', JSON.stringify(response.data, null, 2));
+        return false;
+      }
+      
+      // API возвращает {data: {success: true, data: {...}}}
+      const projectDataFromApi = response.data.data;
+      console.log('Project data from API:', JSON.stringify(projectDataFromApi, null, 2));
+      console.log('Project creation successful - ID:', projectDataFromApi.id);
+      
+      if (!projectDataFromApi || !projectDataFromApi.id) {
+        console.error('Project data missing ID:', projectDataFromApi);
+        return false;
+      }
+      
+      // Создаем объект проекта в формате, ожидаемом convertApiProjectToProject
+      const apiProjectData = {
+        id: projectDataFromApi.id,
+        name: projectDataFromApi.name,
+        description: projectDataFromApi.description || '',
+        color: projectDataFromApi.color,
+        icon: projectDataFromApi.icon || '📋',
+        created_by: projectDataFromApi.created_by,
+        created_at: projectDataFromApi.created_at,
+        updated_at: projectDataFromApi.updated_at
+      };
+      
+      // Convert API response to internal project format
+      const project = convertApiProjectToProject(apiProjectData);
+      console.log('Project converted:', project);
+      
+      if (!project || !project.id) {
+        console.error('Failed to convert project or missing project ID');
+        return false;
+      }
+      
+      console.log('Dispatching ADD_PROJECT with:', project);
+      dispatch({ type: "ADD_PROJECT", payload: project });
+      console.log('ADD_PROJECT dispatched successfully');
+      return true;
     } catch (error) {
       console.error('Failed to create project:', error);
       return false;
     }
   };
 
+  const createProjectWithBoards = async (projectData: {
+    name: string;
+    description?: string;
+    color?: string;
+    members?: string[];
+    telegramChatId?: string;
+    boards?: Array<{
+      name: string;
+      description?: string;
+      columns?: Array<{
+        name: string;
+        status: string;
+        position: number;
+      }>;
+    }>;
+  }): Promise<{ success: boolean; project?: Project; boards?: Board[] }> => {
+    try {
+      const result = await projectService.createProjectWithBoards(projectData);
+      
+      if (result.success && result.project) {
+        dispatch({ type: "ADD_PROJECT", payload: result.project });
+        
+        if (result.boards && result.boards.length > 0) {
+          result.boards.forEach(board => {
+            dispatch({ type: "ADD_BOARD", payload: board });
+          });
+        }
+        
+        return result;
+      }
+      
+      return { success: false };
+    } catch (error) {
+      console.error('Failed to create project with boards:', error);
+      return { success: false };
+    }
+  };
+
   const createBoard = async (boardData: {
     name: string;
     description?: string;
-    projectId: string;
+    project_id: string; // Изменено с projectId для соответствия схеме
   }): Promise<boolean> => {
     try {
       const response = await api.createBoard({
         name: boardData.name,
         description: boardData.description,
-        projectId: boardData.projectId,
+        projectId: boardData.project_id, // Преобразуем обратно для API
         visibility: 'public',
         color: '#6366f1',
         allowComments: true,
@@ -723,7 +833,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         assigneeId: taskData.assigneeId,
         columnId: taskData.columnId,
         position: taskData.position || 0,
-        dueDate: taskData.dueDate,
+        dueDate: taskData.dueDate?.toISOString(),
         estimatedHours: taskData.estimatedHours,
         tags: taskData.tags || []
       });
@@ -867,6 +977,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loadTasks,
     loadUsers,
     createProject,
+    createProjectWithBoards,
     createBoard,
     createTask,
     updateTask,

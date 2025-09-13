@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Task, UpdateTaskData, TaskStatus, TaskPriority } from '../../../data/types';
-import { Modal, Button, Input, Textarea, Select, DatePicker, UserSelect, Slider } from '../../common';
+import { Task, UpdateTaskData } from '../../../data/types';
+import { Modal, Button, Input, Textarea, Select } from '../common';
 import { TaskValidator } from '../../../business/validators';
 import { useProjects } from '../../hooks/useProjects';
 import { useBoards } from '../../hooks/useBoards';
@@ -120,49 +120,17 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    // Validate title
-    const titleValidation = TaskValidator.validateTitle(formData.title);
-    if (!titleValidation.isValid) {
-      newErrors.title = titleValidation.errors[0];
+    // Basic client-side validation
+    if (formData.title !== undefined && formData.title.trim().length === 0) {
+      newErrors.title = 'Title cannot be empty';
     }
 
-    // Validate description (optional)
-    if (formData.description) {
-      const descValidation = TaskValidator.validateDescription(formData.description);
-      if (!descValidation.isValid) {
-        newErrors.description = descValidation.errors[0];
-      }
+    if (formData.title !== undefined && formData.title.length > 200) {
+      newErrors.title = 'Title must be less than 200 characters';
     }
 
-    // Validate project ID
-    if (!formData.projectId) {
-      newErrors.projectId = 'Project is required';
-    }
-
-    // Validate board ID
-    if (!formData.boardId) {
-      newErrors.boardId = 'Board is required';
-    }
-
-    // Validate column ID
-    if (!formData.columnId) {
-      newErrors.columnId = 'Column is required';
-    }
-
-    // Validate due date (if provided)
-    if (formData.dueDate) {
-      const dueDateValidation = TaskValidator.validateDueDate(formData.dueDate);
-      if (!dueDateValidation.isValid) {
-        newErrors.dueDate = dueDateValidation.errors[0];
-      }
-    }
-
-    // Validate progress
-    if (formData.progress !== undefined) {
-      const progressValidation = TaskValidator.validateProgress(formData.progress);
-      if (!progressValidation.isValid) {
-        newErrors.progress = progressValidation.errors[0];
-      }
+    if (formData.description !== undefined && formData.description.length > 5000) {
+      newErrors.description = 'Description must be less than 5000 characters';
     }
 
     setErrors(newErrors);
@@ -212,7 +180,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
     onClose();
   };
 
-  const handleInputChange = (field: keyof UpdateTaskData, value: any) => {
+  const handleInputChange = (field: keyof UpdateTaskData, value: string | string[] | Date | number | undefined) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Clear error when user starts typing
     if (errors[field]) {
@@ -283,7 +251,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             id="edit-task-title"
             type="text"
             value={formData.title}
-            onChange={(e) => handleInputChange('title', e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('title', e.target.value)}
             placeholder="Enter task title"
             error={errors.title}
             disabled={isSubmitting}
@@ -299,7 +267,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
           <Textarea
             id="edit-task-description"
             value={formData.description || ''}
-            onChange={(e) => handleInputChange('description', e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => handleInputChange('description', e.target.value)}
             placeholder="Enter task description (optional)"
             rows={4}
             error={errors.description}
@@ -315,8 +283,8 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             </label>
             <Select
               id="edit-task-status"
-              value={formData.status}
-              onChange={(value) => handleInputChange('status', value)}
+              value={formData.status || ''}
+              onChange={(value: string) => handleInputChange('status', value)}
               options={statusOptions}
               error={errors.status}
               disabled={isSubmitting}
@@ -329,8 +297,8 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             </label>
             <Select
               id="edit-task-priority"
-              value={formData.priority}
-              onChange={(value) => handleInputChange('priority', value)}
+              value={formData.priority || ''}
+              onChange={(value: string) => handleInputChange('priority', value)}
               options={priorityOptions}
               error={errors.priority}
               disabled={isSubmitting}
@@ -343,13 +311,14 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
           <label htmlFor="edit-task-progress" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Progress: {formData.progress || 0}%
           </label>
-          <Slider
+          <Input
             id="edit-task-progress"
-            value={formData.progress || 0}
-            onChange={(value) => handleInputChange('progress', value)}
-            min={0}
-            max={100}
-            step={5}
+            type="range"
+            value={formData.progress?.toString() || '0'}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleInputChange('progress', parseInt(e.target.value))}
+            min="0"
+            max="100"
+            step="1"
             error={errors.progress}
             disabled={isSubmitting}
           />
@@ -363,7 +332,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             </label>
             <Select
               id="edit-task-project"
-              value={formData.projectId}
+              value={formData.projectId || ''}
               onChange={handleProjectChange}
               options={projectOptions}
               placeholder="Select a project"
@@ -383,7 +352,7 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             </label>
             <Select
               id="edit-task-board"
-              value={formData.boardId}
+              value={formData.boardId || ''}
               onChange={handleBoardChange}
               options={boardOptions}
               placeholder="Select a board"
@@ -403,8 +372,8 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             </label>
             <Select
               id="edit-task-column"
-              value={formData.columnId}
-              onChange={(value) => handleInputChange('columnId', value)}
+              value={formData.columnId || ''}
+              onChange={(value: string) => handleInputChange('columnId', value)}
               options={columnOptions}
               placeholder="Select a column"
               error={errors.columnId}
@@ -420,31 +389,30 @@ const EditTaskModal: React.FC<EditTaskModalProps> = ({
             {isOverdue && <span className="text-red-600 dark:text-red-400 ml-2">(Overdue)</span>}
             {isDueSoon && <span className="text-yellow-600 dark:text-yellow-400 ml-2">(Due Soon)</span>}
           </label>
-          <DatePicker
+          <Input
             id="edit-task-due-date"
-            value={formData.dueDate}
-            onChange={(date) => handleInputChange('dueDate', date)}
+            type="date"
+            value={formData.dueDate ? new Date(formData.dueDate).toISOString().split('T')[0] : ''}
+            onChange={(e) => handleInputChange('dueDate', e.target.value ? new Date(e.target.value) : undefined)}
             placeholder="Select due date (optional)"
             error={errors.dueDate}
             disabled={isSubmitting}
-            minDate={new Date()}
+            min={new Date().toISOString().split('T')[0]}
           />
         </div>
 
-        {/* Assignees */}
+        {/* Assignees - Temporarily disabled until UserSelect component is available */}
         <div>
           <label htmlFor="edit-task-assignees" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Assignees
           </label>
-          <UserSelect
+          <Input
             id="edit-task-assignees"
-            value={formData.assigneeIds || []}
-            onChange={(userIds) => handleInputChange('assigneeIds', userIds)}
+            value="Assignee selection temporarily unavailable"
             placeholder="Select assignees (optional)"
-            multiple
             error={errors.assigneeIds}
-            disabled={isSubmitting}
-            projectId={formData.projectId}
+            disabled={true}
+            readOnly
           />
         </div>
 

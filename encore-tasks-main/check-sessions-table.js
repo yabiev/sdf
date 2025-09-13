@@ -1,90 +1,51 @@
 const { Pool } = require('pg');
-const fs = require('fs');
-const path = require('path');
+require('dotenv').config({ path: '.env.local' });
 
-// Загрузка переменных окружения из .env файла
-function loadEnvFile() {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) {
-    console.error('❌ Файл .env не найден!');
-    return {};
-  }
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME || 'encore_tasks',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres',
+  ssl: process.env.DB_SSL === 'true'
+});
 
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  const env = {};
-  
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const [key, ...valueParts] = trimmed.split('=');
-      if (key && valueParts.length > 0) {
-        env[key.trim()] = valueParts.join('=').trim().replace(/^["']|["']$/g, '');
-      }
-    }
-  });
-  
-  return env;
-}
-
-// Проверка структуры таблицы sessions
 async function checkSessionsTable() {
-  console.log('🔍 Проверка структуры таблицы sessions...');
-  console.log('=' .repeat(50));
-
-  // Загрузка конфигурации
-  const env = loadEnvFile();
-  
-  const config = {
-    host: env.POSTGRES_HOST || 'localhost',
-    port: parseInt(env.POSTGRES_PORT) || 5432,
-    database: env.POSTGRES_DB || 'encore_tasks',
-    user: env.POSTGRES_USER || 'postgres',
-    password: env.POSTGRES_PASSWORD || ''
-  };
-
-  const pool = new Pool(config);
-
   try {
-    const client = await pool.connect();
-    console.log('✅ Подключение к PostgreSQL установлено\n');
-
-    // Получение структуры таблицы sessions
-    const result = await client.query(`
+    console.log('🔍 Проверяем структуру таблицы sessions...');
+    
+    // Получаем информацию о столбцах таблицы sessions
+    const result = await pool.query(`
       SELECT column_name, data_type, is_nullable, column_default
       FROM information_schema.columns 
       WHERE table_name = 'sessions' AND table_schema = 'public'
-      ORDER BY ordinal_position
+      ORDER BY ordinal_position;
     `);
     
-    console.log('📋 Структура таблицы sessions:');
     if (result.rows.length === 0) {
-      console.log('❌ Таблица sessions не найдена!');
+      console.log('❌ Таблица sessions не найдена');
     } else {
+      console.log('✅ Структура таблицы sessions:');
       result.rows.forEach(row => {
-        console.log(`   ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable}) default: ${row.column_default || 'none'}`);
+        console.log(`  - ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable})`);
       });
     }
-
-    client.release();
+    
+    // Также проверим, существует ли таблица вообще
+    const tableExists = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = 'sessions'
+      );
+    `);
+    
+    console.log('\n📋 Таблица sessions существует:', tableExists.rows[0].exists);
     
   } catch (error) {
-    console.error('❌ Ошибка:', error.message);
+    console.error('❌ Ошибка при проверке таблицы sessions:', error.message);
   } finally {
     await pool.end();
   }
 }
 
-// Запуск проверки
-if (require.main === module) {
-  checkSessionsTable()
-    .then(() => {
-      console.log('\n🏁 Проверка структуры завершена.');
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error('\n💥 Критическая ошибка:', error.message);
-      process.exit(1);
-    });
-}
-
-module.exports = { checkSessionsTable };
+checkSessionsTable();

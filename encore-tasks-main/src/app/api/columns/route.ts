@@ -1,199 +1,228 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { verifyAuth } from '@/lib/auth';
-import { z } from 'zod';
-import { ColumnService } from '@/services/implementations/column.service';
-import { ColumnRepository } from '@/services/implementations/column.repository';
-import { ColumnValidator } from '@/services/implementations/column.validator';
-import { dbAdapter } from '@/lib/database-adapter';
+import { NextRequest, NextResponse } from 'next/server'
+import { verifyAuth } from '@/lib/auth'
+import { dbAdapter } from '@/lib/database-adapter'
+import { z } from 'zod'
 
 const createColumnSchema = z.object({
-  title: z.string().min(1, 'Column title is required'),
-  boardId: z.string().min(1, 'Board ID is required'),
-  color: z.string().regex(/^#[0-9A-F]{6}$/i, 'Invalid color format').optional(),
-  wipLimit: z.number().min(1).optional().nullable(),
-  isCollapsed: z.boolean().optional()
-});
+  name: z.string().min(1, 'Name is required'),
+  board_id: z.union([z.string(), z.number()]).transform(val => val.toString()),
+  position: z.number().optional(),
+  color: z.string().optional()
+})
 
-// Инициализация сервисов
-const columnRepository = new ColumnRepository(dbAdapter);
-const columnValidator = new ColumnValidator();
-const columnService = new ColumnService(
-  columnRepository,
-  columnValidator,
-  null, // wip service
-  null, // automation service
-  null, // factory
-  null  // event service
-);
-
-// Получение списка колонок
-export async function GET(request: NextRequest) {
+// Функция для проверки доступа к проекту
+async function checkProjectAccess(userId: string, projectId: string): Promise<boolean> {
   try {
-    const user = await verifyAuth(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(request.url);
-    const boardId = searchParams.get('boardId');
-
-    if (!boardId) {
-      return NextResponse.json({ error: 'Board ID is required' }, { status: 400 });
-    }
-
-    // Проверка доступа к доске через проект
-    const board = await databaseAdapter.getBoardById(Number(boardId));
-    if (!board) {
-      return NextResponse.json({ error: 'Board not found' }, { status: 404 });
-    }
-    
-    const hasAccess = await databaseAdapter.hasProjectAccess(Number(user.id), Number(board.project_id));
-    if (!hasAccess) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
-
-    // Используем новый сервис для получения колонок
-    const result = await columnService.getByBoardId(boardId, {
-      includeArchived: searchParams.get('includeArchived') === 'true',
-      sortBy: (searchParams.get('sortBy') as any) || 'position',
-      sortOrder: (searchParams.get('sortOrder') as any) || 'asc'
-    });
-
-    if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
-    }
-
-    return NextResponse.json({ columns: result.data });
+    // Используем метод hasProjectAccess из database adapter
+    return await dbAdapter.hasProjectAccess(userId, projectId)
   } catch (error) {
-    console.error('Error fetching columns:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error checking project access:', error)
+    return false
   }
 }
 
-// Создание новой колонки
+export async function GET(request: NextRequest) {
+  try {
+    const authResult = await verifyAuth(request)
+    if (!authResult.success || !authResult.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { searchParams } = new URL(request.url)
+    const boardId = searchParams.get('boardId') || searchParams.get('board_id')
+    const projectId = searchParams.get('project_id')
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '10')
+    const offset = (page - 1) * limit
+
+    // Проверяем доступ к проекту
+    if (projectId) {
+      const hasAccess = await checkProjectAccess(authResult.user.userId, projectId)
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      }
+    }
+
+    // Если указан board_id, получаем колонки для конкретной доски
+    if (boardId) {
+      // Проверяем доступ к доске через проект
+      const boardResult = await dbAdapter.query(
+        'SELECT project_id FROM boards WHERE id = ?',
+        [boardId]
+      )
+      
+      if (boardResult.length === 0) {
+        return NextResponse.json({ error: 'Board not found' }, { status: 404 })
+      }
+
+      const projectId = boardResult[0].project_id
+       const hasAccess = await checkProjectAccess(authResult.user.userId, projectId)
+      if (!hasAccess) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      }
+      
+      // Получаем колонки для доски
+      const columns = await dbAdapter.getBoardColumns(boardId)
+      
+      return NextResponse.json({
+        columns,
+        pagination: {
+          page: 1,
+          limit: columns.length,
+          total: columns.length,
+          totalPages: 1
+        }
+      })
+    }
+
+    // Если указан project_id, получаем все колонки проекта
+    if (projectId) {
+      const boards = await dbAdapter.query(
+        'SELECT id FROM boards WHERE project_id = ?',
+        [projectId]
+      )
+      
+      const allColumns = []
+      for (const board of boards) {
+        const columns = await dbAdapter.getBoardColumns(board.id)
+        allColumns.push(...columns)
+      }
+      
+      // Применяем пагинацию
+      const paginatedColumns = allColumns.slice(offset, offset + limit)
+      
+      return NextResponse.json({
+        columns: paginatedColumns,
+        pagination: {
+          page,
+          limit,
+          total: allColumns.length,
+          totalPages: Math.ceil(allColumns.length / limit)
+        }
+      })
+    }
+
+    return NextResponse.json({ error: 'Board ID or Project ID is required' }, { status: 400 })
+  } catch (error) {
+    console.error('Error fetching columns:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const user = await verifyAuth(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = await verifyAuth(request)
+    if (!authResult.success || !authResult.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body = await request.json();
-    const validatedData = createColumnSchema.parse(body);
+    const body = await request.json()
+    const validatedData = createColumnSchema.parse(body)
 
-    // Проверка доступа к доске через проект
-    const board = await databaseAdapter.getBoardById(Number(validatedData.boardId));
+    // Получаем информацию о доске и проекте
+    const board = await dbAdapter.getBoardById(validatedData.board_id)
+
     if (!board) {
-      return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Board not found' }, { status: 404 })
     }
+
+    const projectId = board.project_id
+
+    // Проверяем доступ к проекту
+    console.log('🔍 Checking project access:', {
+      userId: authResult.user.userId,
+      projectId: projectId,
+      boardId: validatedData.board_id
+    })
     
-    const hasAccess = await databaseAdapter.hasProjectAccess(Number(user.id), Number(board.project_id));
+    const hasAccess = await checkProjectAccess(authResult.user.userId, projectId)
+    console.log('🔍 Project access result:', hasAccess)
+    
     if (!hasAccess) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      console.log('❌ Access denied for user', authResult.user.userId, 'to project', projectId)
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
-    // Используем новый сервис для создания колонки
-    const result = await columnService.create({
-      title: validatedData.title,
-      boardId: validatedData.boardId,
-      color: validatedData.color || '#6366f1',
-      wipLimit: validatedData.wipLimit,
-      isCollapsed: validatedData.isCollapsed || false,
-      settings: {
-        autoMoveRules: [],
-        notifications: {
-          onTaskAdded: false,
-          onTaskMoved: false,
-          onWipLimitExceeded: true
-        },
-        taskTemplate: {
-          defaultPriority: 'medium',
-          defaultTags: []
-        }
-      }
-    }, user.id);
-
-    if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
+    // Создаем колонку используя database adapter
+    const columnData = {
+      name: validatedData.name,
+      title: validatedData.name, // Добавляем title для совместимости
+      board_id: validatedData.board_id,
+      position: validatedData.position,
+      color: validatedData.color || '#6B7280',
+      created_by: authResult.user.userId
     }
 
-    return NextResponse.json({ column: result.data }, { status: 201 });
+    const newColumn = await dbAdapter.createColumn(columnData)
+
+    return NextResponse.json({
+      column: newColumn
+    }, { status: 201 })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: 'Validation error', details: error.errors },
         { status: 400 }
-      );
+      )
     }
 
-    console.error('Error creating column:', error);
+    console.error('Error creating column:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
   }
 }
 
-// Обновление позиций колонок (для drag & drop)
-export async function PUT(request: NextRequest) {
+export async function DELETE(request: NextRequest) {
   try {
-    const user = await verifyAuth(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authResult = await verifyAuth(request)
+    if (!authResult.success || !authResult.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { columns, boardId } = await request.json();
+    const { searchParams } = new URL(request.url)
+    const columnId = searchParams.get('id')
 
-    if (!Array.isArray(columns) || columns.length === 0) {
-      return NextResponse.json(
-        { error: 'Columns array is required' },
-        { status: 400 }
-      );
+    if (!columnId) {
+      return NextResponse.json({ error: 'Column ID is required' }, { status: 400 })
     }
 
-    if (!boardId) {
-      return NextResponse.json(
-        { error: 'Board ID is required' },
-        { status: 400 }
-      );
+    // Проверяем права на удаление колонки
+    const columnResult = await dbAdapter.query(
+      `SELECT c.*, b.project_id, p.created_by as project_creator
+       FROM columns c
+       JOIN boards b ON c.board_id = b.id
+       JOIN projects p ON b.project_id = p.id
+       WHERE c.id = ?`,
+      [columnId]
+    )
+
+    if (columnResult.length === 0) {
+       return NextResponse.json({ error: 'Column not found' }, { status: 404 })
+     }
+
+     const column = columnResult[0]
+    const isCreator = column.created_by === authResult.user.userId
+    const isProjectCreator = column.project_creator === authResult.user.userId
+    const hasProjectAccess = await checkProjectAccess(authResult.user.userId, column.project_id)
+
+    if (!isCreator && !isProjectCreator && !hasProjectAccess) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
-    // Проверка доступа к доске
-    const board = await databaseAdapter.getBoardById(Number(boardId));
-    if (!board) {
-      return NextResponse.json({ error: 'Board not found' }, { status: 404 });
-    }
-    
-    const hasAccess = await databaseAdapter.hasProjectAccess(Number(user.id), Number(board.project_id));
-    if (!hasAccess) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
+    // Удаляем колонку используя database adapter
+    await dbAdapter.deleteColumn(columnId)
 
-    // Преобразуем данные в нужный формат
-    const columnOrders = columns.map((col: any, index: number) => ({
-      id: col.id,
-      position: index
-    }));
-
-    // Используем новый сервис для изменения порядка колонок
-    const result = await columnService.reorder(boardId, columnOrders, user.id);
-
-    if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
-    }
-
-    return NextResponse.json(
-      { message: 'Column positions updated successfully' },
-      { status: 200 }
-    );
+    return NextResponse.json({ message: 'Column deleted successfully' })
   } catch (error) {
-    console.error('Error updating column positions:', error);
+    console.error('Error deleting column:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
   }
 }

@@ -1,64 +1,49 @@
 const { Pool } = require('pg');
-const fs = require('fs');
-const path = require('path');
-
-function loadEnvFile() {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) {
-    console.error('❌ Файл .env не найден!');
-    return {};
-  }
-
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  const env = {};
-  
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const [key, ...valueParts] = trimmed.split('=');
-      if (key && valueParts.length > 0) {
-        env[key.trim()] = valueParts.join('=').trim().replace(/^["']|["']$/g, '');
-      }
-    }
-  });
-  
-  return env;
-}
 
 async function checkTasksTable() {
-  const env = loadEnvFile();
-  
-  const config = {
-    host: env.POSTGRES_HOST || 'localhost',
-    port: parseInt(env.POSTGRES_PORT) || 5432,
-    database: env.POSTGRES_DB || 'encore_tasks',
-    user: env.POSTGRES_USER || 'postgres',
-    password: env.POSTGRES_PASSWORD || ''
-  };
-
-  const pool = new Pool(config);
+  const pool = new Pool({
+    host: 'localhost',
+    port: 5432,
+    database: 'encore_tasks',
+    user: 'postgres',
+    password: 'newpassword123'
+  });
 
   try {
-    const client = await pool.connect();
+    console.log('🔍 Checking tasks table structure...');
     
-    const result = await client.query(`
-      SELECT column_name, data_type, is_nullable, column_default 
+    // Получаем структуру таблицы tasks
+    const result = await pool.query(`
+      SELECT column_name, data_type, is_nullable
       FROM information_schema.columns 
-      WHERE table_name = 'tasks' AND table_schema = 'public' 
-      ORDER BY ordinal_position
+      WHERE table_name = 'tasks' 
+      AND table_schema = 'public'
+      ORDER BY ordinal_position;
     `);
     
-    console.log('📋 Структура таблицы tasks:');
+    console.log('\n📋 Tasks table columns:');
     result.rows.forEach(row => {
-      console.log(`   ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable}, default: ${row.column_default})`);
+      console.log(`- ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable})`);
     });
     
-    client.release();
+    // Проверим также есть ли данные в таблице
+    const countResult = await pool.query('SELECT COUNT(*) as count FROM tasks');
+    console.log(`\n📊 Total tasks in table: ${countResult.rows[0].count}`);
+    
+    // Покажем первые несколько записей если есть
+    if (countResult.rows[0].count > 0) {
+      const sampleResult = await pool.query('SELECT * FROM tasks LIMIT 3');
+      console.log('\n📝 Sample tasks:');
+      sampleResult.rows.forEach((task, index) => {
+        console.log(`Task ${index + 1}:`, task);
+      });
+    }
+    
   } catch (error) {
-    console.error('❌ Ошибка:', error.message);
+    console.error('❌ Error checking tasks table:', error.message);
   } finally {
     await pool.end();
   }
 }
 
-checkTasksTable().catch(console.error);
+checkTasksTable();

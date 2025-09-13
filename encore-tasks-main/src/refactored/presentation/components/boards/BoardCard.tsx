@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Board, UpdateBoardData } from '../../../data/types';
-import { Button, Badge, Avatar, DropdownMenu, ConfirmDialog } from '../../common';
+import { Board, UpdateBoardData, CreateBoardData } from '../../../data/types';
+import { Badge, DropdownMenu, ConfirmDialog } from '../common';
 import { useAuth } from '../../context/AuthContext';
 import EditBoardModal from './EditBoardModal';
-import DuplicateBoardModal from './DuplicateBoardModal';
-import { formatDate, getInitials } from '../../utils';
+import DuplicateBoardModal, { DuplicateOptions } from './DuplicateBoardModal';
+import { formatDate } from '../../utils';
 
 interface BoardCardProps {
   board: Board;
@@ -12,7 +12,7 @@ interface BoardCardProps {
   onDelete: (id: string) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
-  onDuplicate: (id: string, name: string) => Promise<void>;
+  onDuplicate: (id: string, data: CreateBoardData & { duplicateOptions: DuplicateOptions }) => Promise<void>;
   className?: string;
 }
 
@@ -32,9 +32,9 @@ const BoardCard: React.FC<BoardCardProps> = ({
   const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
   const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
   
-  const canEdit = user?.permissions?.canEditBoards || board.createdBy === user?.id;
-  const canDelete = user?.permissions?.canDeleteBoards || board.createdBy === user?.id;
-  const canArchive = user?.permissions?.canArchiveBoards || board.createdBy === user?.id;
+  const canEdit = user?.role === 'admin' || board.createdBy === user?.id;
+  const canDelete = user?.role === 'admin' || board.createdBy === user?.id;
+  const canArchive = user?.role === 'admin' || board.createdBy === user?.id;
   
   // Calculate progress
   const totalTasks = board.statistics?.totalTasks || 0;
@@ -92,7 +92,7 @@ const BoardCard: React.FC<BoardCardProps> = ({
   
   if (canDelete) {
     if (menuItems.length > 0) {
-      menuItems.push({ type: 'divider' });
+      menuItems.push({ type: 'divider' as const });
     }
     
     menuItems.push({
@@ -103,7 +103,7 @@ const BoardCard: React.FC<BoardCardProps> = ({
         </svg>
       ),
       onClick: () => setIsDeleteDialogOpen(true),
-      variant: 'danger'
+      variant: 'danger' as const
     });
   }
   
@@ -112,8 +112,8 @@ const BoardCard: React.FC<BoardCardProps> = ({
     setIsEditModalOpen(false);
   };
   
-  const handleDuplicateBoard = async (name: string) => {
-    await onDuplicate(board.id, name);
+  const handleDuplicateBoard = async (data: CreateBoardData & { duplicateOptions: DuplicateOptions }) => {
+    await onDuplicate(board.id, data);
     setIsDuplicateModalOpen(false);
   };
   
@@ -224,12 +224,12 @@ const BoardCard: React.FC<BoardCardProps> = ({
         )}
 
         {/* Project Info */}
-        {board.project && (
+        {board.projectId && (
           <div className="px-4 pb-2">
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500 dark:text-gray-400">Project:</span>
               <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                {board.project.name}
+                {board.projectId}
               </span>
             </div>
           </div>
@@ -240,7 +240,7 @@ const BoardCard: React.FC<BoardCardProps> = ({
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
             <span>Updated {formatDate(board.updatedAt)}</span>
             {board.statistics?.overdueTasks > 0 && (
-              <Badge variant="danger" size="sm">
+              <Badge variant="error" size="sm">
                 {board.statistics.overdueTasks} overdue
               </Badge>
             )}

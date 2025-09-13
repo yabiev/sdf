@@ -68,7 +68,7 @@ export class TelegramService {
   static async sendTaskNotification(
   task: Task,
   project: Project,
-  action: "created" | "updated" | "moved" | "completed" | "assigned",
+  action: "created" | "updated" | "moved" | "done" | "assigned",
   details?: string)
   : Promise<boolean> {
     // Skip if not in valid environment
@@ -85,7 +85,7 @@ export class TelegramService {
       created: "🆕",
       updated: "✏️",
       moved: "🔄",
-      completed: "✅",
+      done: "✅",
       assigned: "👤"
     };
 
@@ -98,10 +98,10 @@ export class TelegramService {
 
     const statusEmojis = {
       todo: "📋",
-      "in-progress": "⚡",
+      "in_progress": "⚡",
       review: "👀",
       done: "✅",
-      archived: "📦"
+      blocked: "🚫"
     };
 
     let messageText = `${actionEmojis[action]} <b>Задача ${
@@ -111,7 +111,7 @@ export class TelegramService {
     "обновлена" :
     action === "moved" ?
     "перемещена" :
-    action === "completed" ?
+    action === "done" ?
     "завершена" :
     "назначена"}</b>\n\n`;
 
@@ -135,12 +135,16 @@ export class TelegramService {
     messageText += `${statusEmojis[task.status]} Статус: ${
     task.status === "todo" ?
     "К выполнению" :
-    task.status === "in-progress" ?
+    task.status === "in_progress" ?
     "В работе" :
+    task.status === "review" ?
+    "На проверке" :
+    task.status === "blocked" ?
+    "Заблокировано" :
     "Выполнено"}\n`;
 
 
-    const assignees = task.assignees || (task.assignee ? [task.assignee] : []);
+    const assignees = task.assignees || [];
     if (assignees.length > 0) {
       if (assignees.length === 1) {
         messageText += `👤 Исполнитель: ${assignees[0].name}\n`;
@@ -149,8 +153,8 @@ export class TelegramService {
       }
     }
 
-    if (task.deadline) {
-      const deadline = new Date(task.deadline);
+    if (task.due_date) {
+      const deadline = new Date(task.due_date);
       messageText += `⏰ Дедлайн: ${deadline.toLocaleDateString("ru-RU")}\n`;
     }
 
@@ -213,17 +217,17 @@ export class TelegramService {
 
     const today = new Date();
     const todayTasks = tasks.filter((task) => {
-      const taskDate = new Date(task.createdAt);
+      const taskDate = new Date(task.created_at);
       return taskDate.toDateString() === today.toDateString();
     });
 
     const completedTasks = tasks.filter((task) => task.status === "done");
     const inProgressTasks = tasks.filter(
-      (task) => task.status === "in-progress"
+      (task) => task.status === "in_progress"
     );
     const overdueTasks = tasks.filter((task) => {
-      if (!task.deadline) return false;
-      return new Date(task.deadline) < today && task.status !== "done";
+      if (!task.due_date) return false;
+      return new Date(task.due_date) < today && task.status !== "done";
     });
 
     let messageText = `📊 <b>Ежедневный отчет - ${today.toLocaleDateString("ru-RU")}</b>\n`;
@@ -239,7 +243,7 @@ export class TelegramService {
     if (overdueTasks.length > 0) {
       messageText += `⚠️ <b>Просроченные задачи:</b>\n`;
       overdueTasks.slice(0, 5).forEach((task) => {
-        const assignees = task.assignees || (task.assignee ? [task.assignee] : []);
+        const assignees = task.assignees || [];
         const assigneeText = assignees.length > 0 ? assignees.map(a => a.name).join(", ") : "Не назначено";
         messageText += `• ${task.title} (${assigneeText})\n`;
       });

@@ -486,7 +486,7 @@ export class BoardService implements IBoardService {
     }
   }
 
-  async getBoardStatistics(id: BoardId, userId: UserId): Promise<OperationResult<any>> {
+  async getBoardStatistics(id: BoardId): Promise<OperationResult<Record<string, unknown>>> {
     try {
       // Проверяем права доступа
       const canView = await this.permissionService.canUserViewBoard(id, userId);

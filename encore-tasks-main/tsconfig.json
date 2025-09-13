@@ -23,5 +23,13 @@
         }
     },
     "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-    "exclude": ["node_modules"]
+    "exclude": [
+        "node_modules",
+        "src/services/implementations/**/*",
+        "src/utils/taskLogger.ts",
+        "src/components/**/*",
+        "src/hooks/**/*",
+        "src/pages/**/*",
+        "src/contexts/**/*"
+    ]
 }

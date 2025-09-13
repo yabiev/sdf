@@ -19,7 +19,7 @@ import {
   Activity
 } from "lucide-react";
 import { useConfirmation } from "@/hooks/useConfirmation";
-import { CreateTaskModal } from "./CreateTaskModal";
+import CreateTaskModal from "./CreateTaskModal";
 import BoardManager from "./BoardManager";
 import { CustomSelect } from "./CustomSelect";
 import { TaskActionsModal } from "./TaskActionsModal";
@@ -31,13 +31,15 @@ interface TopBarProps {
   sidebarCollapsed?: boolean;
   onNavigate?: (page: string) => void;
   currentPage?: string;
+  currentProject?: any;
 }
 
 export function TopBar({
   onToggleSidebar,
   sidebarCollapsed,
   onNavigate,
-  currentPage = "boards"
+  currentPage = "boards",
+  currentProject
 }: TopBarProps) {
   const { state, dispatch, createTask, logout } = useApp();
   const { ConfirmationComponent, confirm } = useConfirmation();
@@ -47,13 +49,27 @@ export function TopBar({
   const [isTaskActionsModalOpen, setIsTaskActionsModalOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
 
-  const handleCreateTask = async (taskData: Omit<Task, "id" | "createdAt" | "updatedAt">) => {
+  const handleCreateTask = async (taskData: {
+    title: string;
+    description?: string;
+    status?: string;
+    priority?: string;
+    assigneeId?: string;
+    columnId: string;
+    position?: number;
+    dueDate?: Date;
+    estimatedHours?: number;
+    tags?: string[];
+  }): Promise<boolean> => {
     try {
-      const newTask = await createTask(taskData);
-      logTaskCreated(newTask);
-      setIsCreateTaskModalOpen(false);
+      const success = await createTask(taskData);
+      if (success) {
+        setIsCreateTaskModalOpen(false);
+      }
+      return success;
     } catch (error) {
       console.error("Ошибка при создании задачи:", error);
+      return false;
     }
   };
 
@@ -80,31 +96,35 @@ export function TopBar({
 
   const getUnreadNotificationsCount = () => {
     if (!state.notifications) return 0;
-    return state.notifications.filter(n => !n.read).length;
+    return state.notifications.filter(n => !n.isRead).length;
   };
 
   const handleFilterChange = (filterType: string, value: string) => {
     dispatch({
-      type: "SET_FILTER",
+      type: "SET_FILTERS",
       payload: { [filterType]: value }
     });
   };
 
   const clearFilters = () => {
     dispatch({
-      type: "CLEAR_FILTERS"
+      type: "SET_FILTERS",
+      payload: {
+        assignee: "",
+        priority: "",
+        status: "",
+        deadline: ""
+      }
     });
   };
 
   const hasActiveFilters = () => {
-    return state.filters.assignee || state.filters.priority || state.filters.status || state.filters.tag;
+    return state.filters.assignee || state.filters.priority || state.filters.status || state.filters.deadline;
   };
 
   const getFilteredTasksCount = () => {
     if (!state.selectedBoard) return 0;
-    return state.selectedBoard.columns.reduce((total, column) => {
-      return total + column.tasks.length;
-    }, 0);
+    return state.tasks.filter(task => task.board_id === state.selectedBoard?.id).length;
   };
 
   const unreadNotifications = getUnreadNotificationsCount();
@@ -131,18 +151,18 @@ export function TopBar({
                 <h1 className="text-lg lg:text-xl font-semibold text-white truncate" data-oid="ys5n69y">
                   {state.selectedBoard?.name || "Выберите доску"}
                 </h1>
-                {state.selectedProject &&
+                {(currentProject || state.selectedProject) &&
                 <div
                   className="hidden sm:flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full flex-shrink-0"
                   data-oid="4tht53h">
 
                     <div
                     className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: state.selectedProject.color }}
+                    style={{ backgroundColor: (currentProject || state.selectedProject)?.color }}
                     data-oid="rfi5lh." />
 
                     <span className="text-sm text-gray-300" data-oid="fmtdcgr">
-                      {state.selectedProject.name}
+                      {(currentProject || state.selectedProject)?.name}
                     </span>
                   </div>
                 }
@@ -209,7 +229,7 @@ export function TopBar({
 
               <Users className="w-4 h-4" data-oid="0n.wuwq" />
               <span className="text-sm" data-oid="..yd9jl">
-                Команда ({state.selectedProject?.members.length || 0})
+                Команда ({((currentProject || state.selectedProject)?.members?.length) || 0})
               </span>
             </button>
 
@@ -332,9 +352,9 @@ export function TopBar({
                   onChange={(value) => handleFilterChange("assignee", value)}
                   options={[
                     { value: "", label: "Все исполнители" },
-                    ...(state.selectedProject?.members.map(member => ({
-                      value: member.id,
-                      label: member.name
+                    ...((currentProject || state.selectedProject)?.members?.map(member => ({
+                      value: member.userId,
+                      label: member.userId // TODO: Need to get user name from users array
                     })) || [])
                   ]}
                   data-oid="assignee-select" />
@@ -387,7 +407,10 @@ export function TopBar({
         isOpen={isCreateTaskModalOpen}
         onClose={() => setIsCreateTaskModalOpen(false)}
         onSubmit={handleCreateTask}
-        data-oid="create-task-modal" />
+        project={currentProject || state.selectedProject}
+        columnId={(currentProject || state.selectedProject)?.columns?.[0]?.id || ''}
+        projectUsers={(currentProject || state.selectedProject)?.users || []}
+      />
 
       {/* Board Manager Modal */}
       <BoardManager

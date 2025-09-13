@@ -1,5 +1,7 @@
+import React from 'react';
 import { TaskAction } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
+import { AppAction } from '@/contexts/AppContext';
 
 export const createTaskAction = (
   taskId: string,
@@ -30,7 +32,7 @@ export const createTaskAction = (
 };
 
 export const logTaskCreated = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -51,7 +53,7 @@ export const logTaskCreated = (
 };
 
 export const logTaskDeleted = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -72,7 +74,7 @@ export const logTaskDeleted = (
 };
 
 export const logTaskMoved = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -97,7 +99,7 @@ export const logTaskMoved = (
 };
 
 export const logTaskAssigned = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -119,7 +121,7 @@ export const logTaskAssigned = (
 };
 
 export const logTaskAssigneesChanged = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -155,7 +157,7 @@ export const logTaskAssigneesChanged = (
 };
 
 export const logTaskUnassigned = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -177,7 +179,7 @@ export const logTaskUnassigned = (
 };
 
 export const logTaskStatusChanged = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -202,7 +204,7 @@ export const logTaskStatusChanged = (
 };
 
 export const logTaskPriorityChanged = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,
@@ -227,7 +229,7 @@ export const logTaskPriorityChanged = (
 };
 
 export const logTaskUpdated = (
-  dispatch: any,
+  dispatch: React.Dispatch<AppAction>,
   taskId: string,
   boardId: string,
   projectId: string,

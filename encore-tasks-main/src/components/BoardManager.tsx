@@ -3,10 +3,9 @@
 import React, { useState } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { Board } from "@/types";
-import { generateId } from "@/lib/utils";
-import { Plus, Edit2, Trash2, Settings } from "lucide-react";
+import { Plus, Edit2, Trash2 } from "lucide-react";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
-import { CreateBoardModal } from "./CreateBoardModal";
+import { CreateBoardModalSimple } from "./CreateBoardModalSimple";
 import { api } from "@/lib/api";
 
 interface BoardManagerProps {
@@ -22,14 +21,14 @@ function BoardManager({ isOpen, onClose }: BoardManagerProps) {
   const [boardToDelete, setBoardToDelete] = useState<Board | null>(null);
 
   // Получаем информацию о текущем пользователе
-  const currentUser = state.user;
+  const currentUser = state.currentUser;
   const isAdmin = currentUser?.role === 'admin';
-  const isProjectOwner = state.selectedProject?.createdBy === currentUser?.id;
+  const isProjectOwner = state.selectedProject?.created_by === currentUser?.id;
 
   if (!isOpen || !state.selectedProject) return null;
 
   const projectBoards = state.boards.filter(
-    (board) => board.projectId === state.selectedProject!.id
+    (board) => board.project_id === state.selectedProject!.id
   );
 
   const handleCreateBoard = async (boardData: Omit<Board, "id" | "createdAt">) => {
@@ -37,14 +36,14 @@ function BoardManager({ isOpen, onClose }: BoardManagerProps) {
       console.log('Creating board with data:', {
         name: boardData.name,
         description: boardData.description,
-        projectId: boardData.projectId,
+        project_id: boardData.project_id,
         selectedProjectId: state.selectedProject?.id
       });
       
       const success = await createBoard({
         name: boardData.name,
         description: boardData.description,
-        projectId: boardData.projectId
+        project_id: boardData.project_id
       });
       
       if (success) {
@@ -103,8 +102,8 @@ function BoardManager({ isOpen, onClose }: BoardManagerProps) {
         </div>
 
         <div className="p-6">
-          {/* Create new board - только для админов, владельцев проекта и участников */}
-          {(isAdmin || isProjectOwner || state.selectedProject?.members?.some(m => m.id === currentUser?.id)) && (
+          {/* Create new board - только для админов и владельцев проекта */}
+          {(isAdmin || isProjectOwner) && (
             <div className="mb-6">
               <button
                 onClick={() => setShowCreateModal(true)}
@@ -119,7 +118,7 @@ function BoardManager({ isOpen, onClose }: BoardManagerProps) {
           {/* Boards list */}
           <div className="space-y-3">
             <h3 className="text-lg font-medium text-white mb-4">
-              Доски проекта "{state.selectedProject.name}"
+              Доски проекта &quot;{state.selectedProject.name}&quot;
             </h3>
 
             {projectBoards.length === 0 ? (
@@ -175,8 +174,8 @@ function BoardManager({ isOpen, onClose }: BoardManagerProps) {
                     >
                       Выбрать
                     </button>
-                    {/* Кнопка редактирования - для админов, владельцев проекта, создателей доски и участников */}
-                    {(isAdmin || isProjectOwner || board.createdBy === currentUser?.id || state.selectedProject?.members?.some(m => m.id === currentUser?.id && (m.role === 'admin' || m.role === 'member'))) && (
+                    {/* Кнопка редактирования - для админов, владельцев проекта и создателей доски */}
+                    {(isAdmin || isProjectOwner || board.created_by === currentUser?.id) && (
                       <button
                         onClick={() => setEditingBoard(board)}
                         className="p-2 hover:bg-white/10 rounded transition-colors"
@@ -211,7 +210,7 @@ function BoardManager({ isOpen, onClose }: BoardManagerProps) {
         message={`Вы уверены, что хотите удалить доску "${boardToDelete?.name}"? Все задачи будут удалены.`}
       />
       
-      <CreateBoardModal
+      <CreateBoardModalSimple
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onSave={handleCreateBoard}
