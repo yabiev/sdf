@@ -24,35 +24,9 @@ async function checkProjectAccess(projectId: string, userId: string): Promise<bo
   try {
     console.log('🔍 Checking project access:', { projectId, userId });
     
-    // Проверяем существование проекта
-    const project = await databaseAdapter.getProjectById(projectId);
-    console.log('📋 Project found:', project);
-    if (!project) {
-      console.log('❌ Project not found');
-      return false;
-    }
-    
-    // Проверяем является ли пользователь создателем проекта
-    console.log('👤 Checking if user is creator:', { created_by: project.created_by, userId });
-    if (project.created_by === userId) {
-      console.log('✅ User is project creator');
-      return true;
-    }
-    
-    // Проверяем является ли пользователь участником проекта
-    const query = `
-      SELECT EXISTS(
-        SELECT 1 FROM project_members 
-        WHERE project_id = ? AND user_id = ?
-      ) as has_access
-    `;
-    
-    console.log('🔍 Checking project membership with query:', query);
-    console.log('🔍 Query params:', [projectId, userId]);
-    const result = await databaseAdapter.query(query, [projectId, userId]);
-    console.log('📊 Membership query result:', result);
-    const hasAccess = (result[0] as any)?.has_access === 1;
-    console.log('✅ Final access result:', hasAccess);
+    // Используем метод адаптера для проверки доступа к проекту
+    const hasAccess = await databaseAdapter.hasProjectAccess(userId, projectId);
+    console.log('✅ Project access result:', hasAccess);
     return hasAccess;
   } catch (error) {
     console.error('Error checking project access:', error);
