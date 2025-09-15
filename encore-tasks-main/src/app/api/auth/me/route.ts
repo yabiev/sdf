@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAuth } from '@/lib/auth';
-import { DatabaseAdapter } from '@/lib/database-adapter';
+import { dbAdapter } from '@/lib/database-adapter';
 
-const databaseAdapter = DatabaseAdapter.getInstance();
+const databaseAdapter = dbAdapter;
 import { createHash } from 'crypto';
 
 // Получение текущего пользователя

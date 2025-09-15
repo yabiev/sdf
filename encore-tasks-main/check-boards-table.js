@@ -1,32 +1,34 @@
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
+require('dotenv').config({ path: '.env.local' });
 
-// Простая проверка структуры таблицы boards
-const dbPath = path.join(__dirname, 'database', 'database.sqlite');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
 
-if (!fs.existsSync(dbPath)) {
-  console.log('Database file not found:', dbPath);
-  process.exit(1);
-}
-
-// Читаем файл базы данных как текст для поиска схемы
-const dbContent = fs.readFileSync(dbPath, 'utf8');
-
-// Ищем CREATE TABLE boards
-const boardsTableMatch = dbContent.match(/CREATE TABLE boards \([^)]+\)/i);
-
-if (boardsTableMatch) {
-  console.log('Found boards table schema:');
-  console.log(boardsTableMatch[0]);
-} else {
-  console.log('boards table schema not found in database file');
-}
-
-// Также проверим, есть ли упоминания description
-const descriptionMatches = dbContent.match(/description[^,\n)]+/gi);
-if (descriptionMatches) {
-  console.log('\nFound description references:');
-  descriptionMatches.forEach(match => console.log('- ' + match));
-} else {
-  console.log('\nNo description column references found');
-}
+(async () => {
+  try {
+    console.log('Checking boards table structure...');
+    
+    const result = await pool.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'boards' 
+      ORDER BY ordinal_position
+    `);
+    
+    console.log('Boards table columns:');
+    result.rows.forEach(row => {
+      console.log(`- ${row.column_name}: ${row.data_type}`);
+    });
+    
+    // Check if there are any boards
+    const boardsResult = await pool.query('SELECT * FROM boards LIMIT 3');
+    console.log('\nSample boards data:');
+    console.log(boardsResult.rows);
+    
+    await pool.end();
+  } catch (error) {
+    console.error('Error:', error.message);
+    process.exit(1);
+  }
+})();

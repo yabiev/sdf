@@ -24,6 +24,13 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { state, dispatch, loadProjects, loadUsers } = useApp();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Debug logging
+  console.log('🔍 Layout: Current state:', {
+    isAuthenticated: state.isAuthenticated,
+    isLoading: state.isLoading,
+    currentUser: state.currentUser
+  });
   const [currentPage, setCurrentPage] = useState("boards");
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(
     !state.isAuthenticated
@@ -70,6 +77,11 @@ export function Layout({ children }: LayoutProps) {
     document.documentElement.lang = language;
   }, [state.settings?.language]);
 
+  // Update auth modal state when authentication changes
+  useEffect(() => {
+    setIsAuthModalOpen(!state.isAuthenticated);
+  }, [state.isAuthenticated]);
+
   // Load initial data when authenticated
   useEffect(() => {
     if (state.isAuthenticated && state.currentUser) {
@@ -90,8 +102,20 @@ export function Layout({ children }: LayoutProps) {
     };
   }, [handleNavigate]);
 
+  // Show loading screen during initialization
+  if (state.isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+          <p className="text-gray-300">Загрузка...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Show auth modal if not authenticated
-  if (!state.isAuthenticated) {
+  if (isAuthModalOpen) {
     return (
       <AuthModal
         isOpen={true}

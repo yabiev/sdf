@@ -268,16 +268,11 @@ export class PostgreSQLAdapter {
   async createProject(projectData: { name: string; description: string; created_by: string; color?: string; icon_url?: string; telegram_chat_id?: string; telegram_topic_id?: string }): Promise<Project> {
     console.log('🔍 PostgreSQL createProject called with:', projectData);
     try {
-      // Конвертируем строковый ID в integer для PostgreSQL
-      const ownerIdInt = parseInt(projectData.created_by, 10);
-      if (isNaN(ownerIdInt)) {
-        throw new Error(`Invalid user ID: ${projectData.created_by}`);
-      }
-      
+      // Используем UUID для новой схемы
       const result = await this.query(
         `INSERT INTO projects (name, description, owner_id, color, icon, telegram_chat_id, telegram_topic_id, is_active, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) RETURNING *`,
-        [projectData.name, projectData.description, ownerIdInt, projectData.color || '#3B82F6', projectData.icon_url || null, projectData.telegram_chat_id || null, projectData.telegram_topic_id || null, true]
+        [projectData.name, projectData.description, projectData.created_by, projectData.color || '#3B82F6', projectData.icon_url || null, projectData.telegram_chat_id || null, projectData.telegram_topic_id || null, true]
       );
       
       const project = result.rows[0];
@@ -286,13 +281,13 @@ export class PostgreSQLAdapter {
       await this.query(
         `INSERT INTO project_members (project_id, user_id, role, joined_at)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
-        [project.id, ownerIdInt, 'owner']
+        [project.id, projectData.created_by, 'owner']
       );
       
-      // Преобразуем owner_id обратно в created_by для совместимости с API
+      // Преобразуем для совместимости с API
       const apiProject = {
         ...project,
-        created_by: project.owner_id.toString(),
+        created_by: project.owner_id,
         icon_url: project.icon,
         telegram_chat_id: project.telegram_chat_id,
         telegram_topic_id: project.telegram_topic_id
@@ -316,7 +311,7 @@ export class PostgreSQLAdapter {
     
     return {
       ...project,
-      created_by: project.owner_id.toString(),
+      created_by: project.owner_id,
       icon_url: project.icon,
       telegram_chat_id: project.telegram_chat_id,
       telegram_topic_id: project.telegram_topic_id
@@ -324,23 +319,16 @@ export class PostgreSQLAdapter {
   }
 
   async getProjectsByUserId(userId: string): Promise<Project[]> {
-    // Конвертируем userId в integer для PostgreSQL
-    const userIdInt = parseInt(userId, 10);
-    if (isNaN(userIdInt)) {
-      console.error('Invalid userId for getProjectsByUserId:', userId);
-      return [];
-    }
-    
     const result = await this.query(
       `SELECT DISTINCT p.* FROM projects p 
        LEFT JOIN project_members pm ON p.id = pm.project_id 
        WHERE (p.owner_id = $1 OR pm.user_id = $1) 
        ORDER BY p.created_at DESC`,
-      [userIdInt]
+      [userId]
     );
     return result.rows.map((project: any) => ({
       ...project,
-      created_by: project.owner_id.toString(),
+      created_by: project.owner_id,
       icon_url: project.icon,
       telegram_chat_id: project.telegram_chat_id,
       telegram_topic_id: project.telegram_topic_id
@@ -357,7 +345,7 @@ export class PostgreSQLAdapter {
     );
     return result.rows.map((project: any) => ({
       ...project,
-      created_by: project.owner_id.toString(),
+      created_by: project.owner_id,
       icon_url: project.icon,
       telegram_chat_id: project.telegram_chat_id,
       telegram_topic_id: project.telegram_topic_id
@@ -382,7 +370,7 @@ export class PostgreSQLAdapter {
     
     return {
       ...project,
-      created_by: project.owner_id.toString(),
+      created_by: project.owner_id,
       icon_url: project.icon,
       telegram_chat_id: project.telegram_chat_id,
       telegram_topic_id: project.telegram_topic_id
@@ -399,13 +387,6 @@ export class PostgreSQLAdapter {
 
   async hasProjectAccess(userId: string, projectId: string): Promise<boolean> {
     try {
-      // Конвертируем userId в integer для сравнения с PostgreSQL
-      const userIdInt = parseInt(userId, 10);
-      if (isNaN(userIdInt)) {
-        console.error('Invalid userId for access check:', userId);
-        return false;
-      }
-      
       // Проверяем, является ли пользователь владельцем проекта
       const ownerResult = await this.query(
         'SELECT owner_id FROM projects WHERE id = $1',
@@ -417,14 +398,14 @@ export class PostgreSQLAdapter {
       }
       
       const projectOwner = ownerResult.rows[0].owner_id;
-      if (projectOwner === userIdInt) {
+      if (projectOwner === userId) {
         return true; // Пользователь является владельцем
       }
       
       // Проверяем членство в проекте
       const memberResult = await this.query(
         'SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2',
-        [projectId, userIdInt]
+        [projectId, userId]
       );
       
       return memberResult.rows.length > 0;
@@ -441,7 +422,7 @@ export class PostgreSQLAdapter {
       `INSERT INTO boards (name, description, project_id, created_by, created_at, updated_at) 
        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
        RETURNING *`,
-      [boardData.name, boardData.description || '', boardData.project_id, parseInt(boardData.created_by, 10)]
+      [boardData.name, boardData.description || '', boardData.project_id, boardData.created_by]
     );
     return result.rows[0];
   }

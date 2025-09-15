@@ -1,211 +1,134 @@
--- PostgreSQL схема для Encore Tasks
--- Миграция с SQLite на PostgreSQL
+-- =====================================================
+-- POSTGRESQL SCHEMA FOR ENCORE TASKS
+-- =====================================================
+-- Создание схемы базы данных для системы управления задачами
 
--- Включаем расширения
+-- Включение расширения для UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Таблица пользователей
-CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    username VARCHAR(255) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    avatar_url TEXT,
-    role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('admin', 'user')),
-    is_active BOOLEAN DEFAULT true,
+    role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('admin', 'user')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Таблица проектов
-CREATE TABLE IF NOT EXISTS projects (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    color VARCHAR(7) DEFAULT '#3B82F6',
-    owner_id INTEGER NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+-- Таблица сессий
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_token VARCHAR(255) UNIQUE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Таблица участников проектов
-CREATE TABLE IF NOT EXISTS project_members (
-    id SERIAL PRIMARY KEY,
-    project_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    role VARCHAR(20) DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+-- Таблица проектов
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Таблица участников проекта
+CREATE TABLE project_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(50) DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(project_id, user_id)
 );
 
 -- Таблица досок
-CREATE TABLE IF NOT EXISTS boards (
-    id SERIAL PRIMARY KEY,
+CREATE TABLE boards (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    project_id INTEGER NOT NULL,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     position INTEGER DEFAULT 0,
-    visibility VARCHAR(20) DEFAULT 'private' CHECK (visibility IN ('private', 'public')),
-    color VARCHAR(7) DEFAULT '#3B82F6',
-    settings JSONB DEFAULT '{}',
-    created_by INTEGER,
-    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Таблица колонок
-CREATE TABLE IF NOT EXISTS columns (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    board_id INTEGER NOT NULL,
+CREATE TABLE columns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    board_id UUID NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
     position INTEGER DEFAULT 0,
-    color VARCHAR(7) DEFAULT '#6B7280',
-    settings JSONB DEFAULT '{}',
-    created_by VARCHAR(255),
-    task_limit INTEGER,
-    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Таблица задач
-CREATE TABLE IF NOT EXISTS tasks (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(500) NOT NULL,
+CREATE TABLE tasks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(255) NOT NULL,
     description TEXT,
-    status VARCHAR(20) DEFAULT 'todo' CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+    column_id UUID NOT NULL REFERENCES columns(id) ON DELETE CASCADE,
+    assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
     priority VARCHAR(20) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
-    project_id INTEGER NOT NULL,
-    board_id INTEGER,
-    column_id INTEGER,
-    assignee_id INTEGER,
-    reporter_id INTEGER NOT NULL,
-    parent_task_id INTEGER,
+    status VARCHAR(20) DEFAULT 'todo' CHECK (status IN ('todo', 'in_progress', 'done')),
     position INTEGER DEFAULT 0,
-    story_points INTEGER,
-    estimated_hours DECIMAL(8,2),
-    actual_hours DECIMAL(8,2),
-    deadline TIMESTAMP WITH TIME ZONE,
-    started_at TIMESTAMP WITH TIME ZONE,
-    completed_at TIMESTAMP WITH TIME ZONE,
-    is_active BOOLEAN DEFAULT true,
+    due_date TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE SET NULL,
-    FOREIGN KEY (column_id) REFERENCES columns(id) ON DELETE SET NULL,
-    FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Таблица тегов
-CREATE TABLE IF NOT EXISTS tags (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) UNIQUE NOT NULL,
-    color VARCHAR(7) DEFAULT '#6B7280',
-    project_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-
--- Таблица связи задач и тегов
-CREATE TABLE IF NOT EXISTS task_tags (
-    task_id INTEGER NOT NULL,
-    tag_id INTEGER NOT NULL,
-    PRIMARY KEY (task_id, tag_id),
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-
--- Таблица комментариев
-CREATE TABLE IF NOT EXISTS comments (
-    id SERIAL PRIMARY KEY,
+-- Таблица комментариев к задачам
+CREATE TABLE task_comments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    task_id INTEGER NOT NULL,
-    author_id INTEGER NOT NULL,
-    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Таблица вложений
-CREATE TABLE IF NOT EXISTS attachments (
-    id SERIAL PRIMARY KEY,
+-- Таблица вложений к задачам
+CREATE TABLE task_attachments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     filename VARCHAR(255) NOT NULL,
-    original_name VARCHAR(255) NOT NULL,
-    file_size BIGINT NOT NULL,
-    mime_type VARCHAR(100) NOT NULL,
-    file_path TEXT NOT NULL,
-    task_id INTEGER NOT NULL,
-    uploaded_by INTEGER NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+    file_path VARCHAR(500) NOT NULL,
+    file_size INTEGER,
+    mime_type VARCHAR(100),
+    uploaded_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Таблица сессий
-CREATE TABLE IF NOT EXISTS sessions (
-    id SERIAL PRIMARY KEY,
-    session_token VARCHAR(255) UNIQUE NOT NULL,
-    user_id INTEGER NOT NULL,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+-- Индексы для оптимизации производительности
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_token ON sessions(session_token);
+CREATE INDEX idx_sessions_expires ON sessions(expires_at);
 
--- Создание индексов для оптимизации производительности
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+CREATE INDEX idx_projects_owner ON projects(owner_id);
+CREATE INDEX idx_project_members_project ON project_members(project_id);
+CREATE INDEX idx_project_members_user ON project_members(user_id);
 
-CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
-CREATE INDEX IF NOT EXISTS idx_projects_is_active ON projects(is_active);
+CREATE INDEX idx_boards_project ON boards(project_id);
+CREATE INDEX idx_boards_position ON boards(position);
 
-CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(project_id);
-CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
+CREATE INDEX idx_columns_board ON columns(board_id);
+CREATE INDEX idx_columns_position ON columns(position);
 
-CREATE INDEX IF NOT EXISTS idx_boards_project_id ON boards(project_id);
-CREATE INDEX IF NOT EXISTS idx_boards_is_active ON boards(is_active);
+CREATE INDEX idx_tasks_column ON tasks(column_id);
+CREATE INDEX idx_tasks_assignee ON tasks(assignee_id);
+CREATE INDEX idx_tasks_position ON tasks(position);
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_priority ON tasks(priority);
 
-CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
-CREATE INDEX IF NOT EXISTS idx_columns_is_active ON columns(is_active);
+CREATE INDEX idx_task_comments_task ON task_comments(task_id);
+CREATE INDEX idx_task_comments_user ON task_comments(user_id);
 
-CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_board_id ON tasks(board_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_column_id ON tasks(column_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_reporter_id ON tasks(reporter_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
-CREATE INDEX IF NOT EXISTS idx_tasks_is_active ON tasks(is_active);
-CREATE INDEX IF NOT EXISTS idx_tasks_deadline ON tasks(deadline);
-
-CREATE INDEX IF NOT EXISTS idx_tags_project_id ON tags(project_id);
-CREATE INDEX IF NOT EXISTS idx_task_tags_task_id ON task_tags(task_id);
-CREATE INDEX IF NOT EXISTS idx_task_tags_tag_id ON task_tags(tag_id);
-
-CREATE INDEX IF NOT EXISTS idx_comments_task_id ON comments(task_id);
-CREATE INDEX IF NOT EXISTS idx_comments_author_id ON comments(author_id);
-CREATE INDEX IF NOT EXISTS idx_comments_is_active ON comments(is_active);
-
-CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);
-CREATE INDEX IF NOT EXISTS idx_attachments_uploaded_by ON attachments(uploaded_by);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_session_token ON sessions(session_token);
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX idx_task_attachments_task ON task_attachments(task_id);
 
 -- Функция для автоматического обновления updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -232,5 +155,34 @@ CREATE TRIGGER update_columns_updated_at BEFORE UPDATE ON columns
 CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_comments_updated_at BEFORE UPDATE ON comments
+CREATE TRIGGER update_task_comments_updated_at BEFORE UPDATE ON task_comments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Вставка тестовых данных
+INSERT INTO users (id, username, email, password_hash, role) VALUES 
+('550e8400-e29b-41d4-a716-446655440000', 'admin', 'admin@encore-tasks.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'),
+('550e8400-e29b-41d4-a716-446655440001', 'user1', 'user1@encore-tasks.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'user');
+
+INSERT INTO projects (id, name, description, owner_id) VALUES 
+('660e8400-e29b-41d4-a716-446655440000', 'Демо проект', 'Демонстрационный проект для тестирования функциональности', '550e8400-e29b-41d4-a716-446655440000');
+
+INSERT INTO project_members (project_id, user_id, role) VALUES 
+('660e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440000', 'owner'),
+('660e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', 'member');
+
+INSERT INTO boards (id, name, description, project_id, position) VALUES 
+('770e8400-e29b-41d4-a716-446655440000', 'Основная доска', 'Главная доска для управления задачами', '660e8400-e29b-41d4-a716-446655440000', 0);
+
+INSERT INTO columns (id, name, board_id, position) VALUES 
+('880e8400-e29b-41d4-a716-446655440000', 'К выполнению', '770e8400-e29b-41d4-a716-446655440000', 0),
+('880e8400-e29b-41d4-a716-446655440001', 'В работе', '770e8400-e29b-41d4-a716-446655440000', 1),
+('880e8400-e29b-41d4-a716-446655440002', 'Выполнено', '770e8400-e29b-41d4-a716-446655440000', 2);
+
+INSERT INTO tasks (id, title, description, column_id, assignee_id, priority, status, position) VALUES 
+('990e8400-e29b-41d4-a716-446655440000', 'Первая задача', 'Описание первой задачи', '880e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', 'medium', 'todo', 0),
+('990e8400-e29b-41d4-a716-446655440001', 'Вторая задача', 'Описание второй задачи', '880e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440000', 'high', 'in_progress', 0);
+
+ECHO 'Схема PostgreSQL успешно создана!';
+ECHO 'Тестовые данные добавлены.';
+ECHO 'Логин: admin@encore-tasks.com';
+ECHO 'Пароль: password';

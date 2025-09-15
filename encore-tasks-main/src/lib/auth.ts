@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import jwt from 'jsonwebtoken';
-import { DatabaseAdapter } from './database-adapter';
+import { dbAdapter } from './database-adapter';
 
-const databaseAdapter = DatabaseAdapter.getInstance();
+const databaseAdapter = dbAdapter;
 
 interface AuthResult {
   success: boolean;
@@ -27,6 +27,7 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
     
     // Получение токена из cookie или заголовка Authorization
     const token = request.cookies.get('auth-token')?.value || 
+                  request.cookies.get('auth-token-client')?.value ||
                   request.headers.get('authorization')?.replace('Bearer ', '');
 
     console.log('Auth token found:', !!token);
@@ -39,19 +40,17 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
       };
     }
 
-    // Проверка JWT токена
+    // Проверяем JWT токен
     let decoded: any;
     const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-    console.log('Using JWT_SECRET:', jwtSecret);
     try {
+      console.log('🔍 Проверяем JWT токен:', token.substring(0, 20) + '...');
       decoded = jwt.verify(token, jwtSecret);
-      console.log('JWT verified successfully for user:', decoded.userId);
-    } catch (jwtError) {
-      console.log('JWT verification failed:', jwtError);
-      return {
-        success: false,
-        error: 'Невалидный токен'
-      };
+      console.log('🔓 JWT токен успешно декодирован:', { userId: decoded.userId, email: decoded.email });
+    } catch (error) {
+      console.log('❌ Ошибка декодирования JWT токена:', error);
+      console.log('🔑 Используемый JWT_SECRET:', jwtSecret);
+      return { success: false, error: 'Invalid token' };
     }
 
     // Используем оптимизированный адаптер для работы с сессиями
@@ -65,8 +64,14 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
          console.log('Session userId:', session?.user_id);
 
          if (!session) {
-           console.log('Session not found or expired for token');
+           console.log('❌ Session not found in database for token');
            return { success: false, error: 'Сессия не найдена или истекла' };
+         }
+
+         // Verify that the JWT userId matches the session user_id
+         if (decoded.userId !== session.user_id) {
+           console.log('❌ JWT userId does not match session user_id');
+           return { success: false, error: 'Несоответствие данных токена и сессии' };
          }
 
        // Получаем пользователя через адаптер
@@ -78,11 +83,13 @@ export async function verifyAuth(request: NextRequest): Promise<AuthResult> {
 
       // Проверяем статус одобрения пользователя
       console.log('User data:', user);
+      console.log('User approval_status:', user.approval_status, 'type:', typeof user.approval_status);
       console.log('User isApproved:', user.isApproved, 'type:', typeof user.isApproved);
       console.log('User role:', user.role);
       
-      // Используем approval_status для PostgreSQL
-      const isApproved = user.isApproved !== undefined ? Boolean(user.isApproved) : true;
+      // Используем approval_status для SQLite или isApproved для других БД
+      const isApproved = user.approval_status !== undefined ? Boolean(user.approval_status) : 
+                        user.isApproved !== undefined ? Boolean(user.isApproved) : true;
       console.log('Final isApproved:', isApproved);
       
       if (!isApproved && user.role !== 'admin') {

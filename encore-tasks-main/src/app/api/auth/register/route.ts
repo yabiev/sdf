@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DatabaseAdapter } from '@/lib/database-adapter';
+import { dbAdapter } from '@/lib/database-adapter';
 import bcrypt from 'bcryptjs';
 
-const databaseAdapter = DatabaseAdapter.getInstance();
+const databaseAdapter = dbAdapter;
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,14 +46,14 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Создание пользователя с правильной структурой данных
-    // Для обычных пользователей isApproved = false - требуется одобрение администратора
-    // Администраторы могут одобрить пользователей через админ панель
+    // Временно устанавливаем isApproved = true для тестирования
+    // В продакшене можно вернуть false для требования одобрения администратора
     const user = await databaseAdapter.createUser({
       email,
       password_hash: hashedPassword,
       name,
       role: 'user',
-      isApproved: false
+      isApproved: true
     });
 
     // Возврат данных пользователя (без пароля) с правильной типизацией

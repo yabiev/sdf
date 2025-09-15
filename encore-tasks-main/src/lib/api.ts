@@ -50,14 +50,11 @@ class ApiClient {
   private getAuthToken(): string | null {
     if (typeof window === 'undefined') return null;
     
-    // Используем только cookie для безопасности (защита от XSS)
-    const cookies = document.cookie.split(';');
-    const authCookie = cookies.find(cookie => cookie.trim().startsWith('auth-token='));
-    if (authCookie) {
-      return authCookie.split('=')[1];
-    }
-    
-    return null;
+    // Используем auth-token-client cookie (доступен для JavaScript)
+    const cookies = document.cookie;
+    const match = cookies.match(/auth-token-client=([^;]+)/);
+    const token = match ? match[1] : null;
+    return token;
   }
 
   private getCSRFToken(): string | null {
@@ -106,6 +103,13 @@ class ApiClient {
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
+        
+        console.log('🌐 API запрос:', {
+          endpoint: `/api${endpoint}`,
+          method: options.method || 'GET',
+          hasToken: !!token,
+          headers: Object.keys(headers)
+        });
 
         // Add CSRF token for state-changing requests
         if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method?.toUpperCase() || 'GET')) {
@@ -246,7 +250,15 @@ class ApiClient {
   }
 
   async getCurrentUser() {
-    return this.request<{ user: any }>('/auth/me');
+    try {
+      const result = await this.request<{ user: any }>('/auth/me');
+      return result;
+    } catch (error) {
+      return {
+        error: 'Сессия истекла. Необходимо войти в систему заново.',
+        data: null
+      };
+    }
   }
 
   // Методы для работы с пользователями

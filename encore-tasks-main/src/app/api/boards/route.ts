@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { DatabaseAdapter } from '@/lib/database-adapter';
+import { dbAdapter } from '@/lib/database-adapter';
 
-const databaseAdapter = DatabaseAdapter.getInstance();
+const databaseAdapter = dbAdapter;
 import { verifyAuth } from '@/lib/auth';
 import { Board, BoardWithStats, CreateBoardDto } from '@/types/core.types';
 

@@ -1,64 +1,41 @@
 const { Pool } = require('pg');
-const fs = require('fs');
-const path = require('path');
 
-function loadEnvFile() {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) {
-    console.error('❌ Файл .env не найден!');
-    return {};
-  }
-
-  const envContent = fs.readFileSync(envPath, 'utf8');
-  const env = {};
-  
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const [key, ...valueParts] = trimmed.split('=');
-      if (key && valueParts.length > 0) {
-        env[key.trim()] = valueParts.join('=').trim().replace(/^["']|["']$/g, '');
-      }
-    }
-  });
-  
-  return env;
-}
+const pool = new Pool({
+  host: 'localhost',
+  port: 5432,
+  database: 'encore_tasks',
+  user: 'postgres',
+  password: 'postgres'
+});
 
 async function checkProjectsTable() {
-  const env = loadEnvFile();
-  
-  const config = {
-    host: env.POSTGRES_HOST || 'localhost',
-    port: parseInt(env.POSTGRES_PORT) || 5432,
-    database: env.POSTGRES_DB || 'encore_tasks',
-    user: env.POSTGRES_USER || 'postgres',
-    password: env.POSTGRES_PASSWORD || ''
-  };
-
-  const pool = new Pool(config);
-
   try {
-    const client = await pool.connect();
+    console.log('📋 Checking projects table structure...');
     
-    const result = await client.query(`
-      SELECT column_name, data_type, is_nullable, column_default 
+    const result = await pool.query(`
+      SELECT column_name, data_type, is_nullable, column_default
       FROM information_schema.columns 
-      WHERE table_name = 'projects' AND table_schema = 'public' 
+      WHERE table_name = 'projects' 
       ORDER BY ordinal_position
     `);
     
-    console.log('📋 Структура таблицы projects:');
+    console.log('Projects table columns:');
     result.rows.forEach(row => {
-      console.log(`   ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable}, default: ${row.column_default})`);
+      console.log(`- ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable})`);
     });
     
-    client.release();
+    console.log('\n📊 Sample projects data:');
+    const projectsResult = await pool.query('SELECT * FROM projects LIMIT 3');
+    console.log(`Found ${projectsResult.rows.length} projects`);
+    projectsResult.rows.forEach((project, index) => {
+      console.log(`Project ${index + 1}:`, project);
+    });
+    
   } catch (error) {
-    console.error('❌ Ошибка:', error.message);
+    console.error('Error:', error.message);
   } finally {
     await pool.end();
   }
 }
 
-checkProjectsTable().catch(console.error);
+checkProjectsTable();

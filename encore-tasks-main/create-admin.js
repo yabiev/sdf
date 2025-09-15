@@ -1,111 +1,85 @@
-const { createClient } = require('@supabase/supabase-js');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  ssl: process.env.DB_SSL === 'true'
+});
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('❌ Отсутствуют переменные окружения Supabase');
-  process.exit(1);
-}
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-async function createAdminUser() {
+async function createAdmin() {
   try {
-    const adminEmail = 'axelencore@mail.ru';
-    const adminPassword = 'Ad580dc6axelencore';
-    const adminName = 'Admin User';
+    console.log('Creating admin user...');
     
-    console.log('🔍 Проверяем существующего пользователя...');
+    const email = 'axelencore@mail.ru';
+    const password = 'Ad580dc6axelencore';
+    const name = 'Admin User';
+    const role = 'admin';
     
-    // Проверяем существует ли пользователь
-    const { data: existingUser, error: checkError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', adminEmail)
-      .single();
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 12);
     
-    if (checkError && checkError.code !== 'PGRST116') {
-      console.error('❌ Ошибка при проверке пользователя:', checkError);
-      return;
-    }
+    // Check if admin user already exists
+    const existingUser = await pool.query(
+      'SELECT id, email, role FROM users WHERE email = $1',
+      [email]
+    );
     
-    // Хешируем пароль
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(adminPassword, saltRounds);
-    
-    if (existingUser) {
-      console.log('👤 Пользователь найден, обновляем пароль и права...');
+    if (existingUser.rows.length > 0) {
+      console.log('Admin user already exists, updating...');
       
-      // Обновляем существующего пользователя
-      const { data: updatedUser, error: updateError } = await supabase
-        .from('users')
-        .update({
-          password_hash: hashedPassword,
-          role: 'admin',
-          is_active: true,
-          name: adminName
-        })
-        .eq('email', adminEmail)
-        .select()
-        .single();
+      // Update existing user
+      await pool.query(`
+        UPDATE users SET
+          password_hash = $1,
+          role = $2,
+          name = $3,
+          approval_status = 'approved'
+        WHERE email = $4
+      `, [passwordHash, role, name, email]);
       
-      if (updateError) {
-        console.error('❌ Ошибка при обновлении пользователя:', updateError);
-        return;
-      }
-      
-      console.log('✅ Пользователь успешно обновлен:', {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        name: updatedUser.name,
-        role: updatedUser.role,
-        is_active: updatedUser.is_active
-      });
+      console.log('✅ Admin user updated successfully');
     } else {
-      console.log('➕ Создаем нового администратора...');
+      console.log('Creating new admin user...');
       
-      // Создаем нового пользователя
-      const { data: newUser, error: createError } = await supabase
-        .from('users')
-        .insert({
-          email: adminEmail,
-          password_hash: hashedPassword,
-          name: adminName,
-          role: 'admin',
-          is_active: true
-        })
-        .select()
-        .single();
+      // Create new user
+      await pool.query(`
+        INSERT INTO users (name, email, password_hash, role, approval_status)
+        VALUES ($1, $2, $3, $4, 'approved')
+      `, [name, email, passwordHash, role]);
       
-      if (createError) {
-        console.error('❌ Ошибка при создании пользователя:', createError);
-        return;
-      }
-      
-      console.log('✅ Администратор успешно создан:', {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role,
-        is_active: newUser.is_active
-      });
+      console.log('✅ Admin user created successfully');
     }
     
-    // Проверяем что пароль корректный
-    console.log('🔐 Проверяем пароль...');
-    const isPasswordValid = await bcrypt.compare(adminPassword, hashedPassword);
-    console.log('✅ Пароль корректный:', isPasswordValid);
+    // Show admin user info
+    const adminUser = await pool.query(
+      'SELECT id, email, name, role, approval_status, created_at FROM users WHERE email = $1',
+      [email]
+    );
     
-    console.log('\n🎉 Готово! Теперь можно войти с данными:');
-    console.log('Email:', adminEmail);
-    console.log('Password:', adminPassword);
+    console.log('\n👤 Admin user info:');
+    const user = adminUser.rows[0];
+    console.log(`  - ID: ${user.id}`);
+    console.log(`  - Email: ${user.email}`);
+    console.log(`  - Name: ${user.name}`);
+    console.log(`  - Role: ${user.role}`);
+    console.log(`  - Status: ${user.approval_status}`);
+    console.log(`  - Created: ${user.created_at}`);
+    
+    console.log('\n🔐 Login credentials:');
+    console.log(`  - Email: ${email}`);
+    console.log(`  - Password: ${password}`);
     
   } catch (error) {
-    console.error('❌ Неожиданная ошибка:', error);
+    console.error('❌ Error creating admin user:', error.message);
+    process.exit(1);
+  } finally {
+    await pool.end();
   }
 }
 
-createAdminUser();
+createAdmin();

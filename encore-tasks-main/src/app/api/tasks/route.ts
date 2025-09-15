@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { DatabaseAdapter } from '@/lib/database-adapter';
+import { dbAdapter } from '@/lib/database-adapter';
 import crypto from 'crypto';
 
-const databaseAdapter = DatabaseAdapter.getInstance();
+const databaseAdapter = dbAdapter;
 import { verifyAuth } from '@/lib/auth';
 import { CreateTaskDto, TaskWithDetails } from '@/types/core.types';
 
